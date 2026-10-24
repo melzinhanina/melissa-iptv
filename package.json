@@ -1,0 +1,14 @@
+{
+  "name": "melissa-iptv",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Projeto IPTV pessoal: catálogo, playlist M3U e player web.",
+  "scripts": {
+    "catalogar": "node catalogar.mjs",
+    "check": "node --check catalogar.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
