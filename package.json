@@ -1,0 +1,13 @@
+{
+  "name": "melissa-iptv-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal TikWM-backed video streaming API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
