@@ -2,12 +2,16 @@
   "name": "melissa-iptv-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal TikWM-backed video streaming API",
+  "description": "TikWM-backed streaming API plus Mahoraga HTML extraction prototype",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "mahoraga": "node src/mahoraga.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0"
   }
 }
