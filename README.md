@@ -1,32 +1,51 @@
-# Melissa API
+# Melissa IPTV / Mahoraga-IPTV
 
-Minimal Node.js HTTP API that uses the public TikWM endpoint to resolve a TikTok video and streams the returned media to the caller.
+Este repositório atualmente contém duas partes:
 
-## Hostless
+- **Melissa API**: API Node.js existente para streaming de mídia resolvida pelo endpoint público TikWM.
+- **Mahoraga-IPTV (protótipo)**: módulo JavaScript que busca HTML e extrai texto útil para análise posterior por IA.
 
-- Runtime: Node.js 20+
-- Start command: `npm start` (or `node server.js`)
-- Port: uses `PORT` from the environment, falling back to `3000`
-- Health check: `GET /health`
-- Download: `POST /download` with JSON `{"url":"https://www.tiktok.com/@user/video/123"}`
+## Requisitos
 
-No npm dependencies are required.
+- Node.js 22.19 ou superior
+- npm
 
-## Test
-
-Health check:
+## Instalação
 
 ```sh
-curl https://YOUR-HOSTLESS-DOMAIN/health
+npm install
 ```
 
-Download to a local file:
+## API existente
+
+O comando padrão continua sendo:
 
 ```sh
-curl -X POST https://YOUR-HOSTLESS-DOMAIN/download \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"YOUR_PUBLIC_TIKTOK_URL"}' \
-  --output video.mp4
+npm start
 ```
 
-The API streams the media instead of saving it to disk. The 500 MB limit is a basic safeguard for this initial test. The public TikWM endpoint may change, rate-limit requests, or fail for some videos. Keep this prototype for personal testing and add authentication/rate limiting before exposing it broadly.
+A API usa a variável `PORT` quando hospedada e mantém as rotas já implementadas em `server.js`.
+
+## Testar o extrator Mahoraga
+
+```sh
+npm run mahoraga -- https://example.com/
+```
+
+O extrator retorna JSON com URL, título, descrição, subtítulos e texto principal. Ele remove alguns elementos normalmente dispensáveis e limita o HTML recebido a 2 MB e o texto extraído a 15 mil caracteres.
+
+## Limitações e segurança
+
+- O protótipo usa `fetch` nativo do Node.js e Cheerio; não executa JavaScript da página.
+- Sites que montam conteúdo dinamicamente podem retornar pouco texto.
+- A filtragem de elementos é heurística e pode remover conteúdo relevante ou deixar anúncios passar.
+- Antes de aceitar URLs de usuários publicamente, é necessário reforçar a proteção contra SSRF, incluindo resolução DNS/IP e validação de todos os destinos de rede.
+- Adicione autenticação e limites de requisições antes de expor a API publicamente.
+- Não coloque chaves de API nem segredos no código ou no GitHub.
+
+## Próximas etapas
+
+1. Testes automatizados do extrator.
+2. Proteção de URLs e tratamento de codificações.
+3. Integração opcional com Tavily ou outro mecanismo de pesquisa.
+4. Integração com IA somente depois de validar e normalizar o conteúdo extraído.
