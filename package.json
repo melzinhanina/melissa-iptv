@@ -1,13 +1,17 @@
 {
   "name": "melissa-iptv",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Servidor de streaming com proxy pseudo-206 para URLs do Google Fotos",
+  "description": "Servidor IPTV com extração automática do Google Fotos e proxy pseudo-206",
   "scripts": {
-    "start": "node server.js"
+    "start": "node start.js",
+    "extract": "node extractor.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.18.0 || >=24.11.0"
+  },
+  "dependencies": {
+    "@marcus5914/google-photos-album-image-url-fetch": "1.1.0"
   }
 }
