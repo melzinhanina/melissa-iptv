@@ -1,77 +1,78 @@
 # Melissa IPTV
 
-Servidor Node.js leve para servir vídeos do Google Fotos a players IPTV.
+Servidor IPTV em Node.js que atualiza automaticamente o catálogo a partir de um álbum compartilhado do Google Fotos e serve os vídeos com suporte a Range no lado do player.
 
-## Como funciona
+## Inicialização automática
 
-A origem do Google Fotos entrega o arquivo completo com HTTP 200 e ignora o cabeçalho Range. Por isso, o servidor faz o seguinte:
-
-1. Busca a URL original do vídeo no primeiro acesso.
-2. Segue o redirecionamento do Google Fotos.
-3. Baixa o arquivo completo para um cache temporário em disco.
-4. Responde ao player com HTTP 200 ou HTTP 206 e os intervalos solicitados.
-5. Mantém somente o último vídeo no cache temporário para limitar o uso de disco.
-
-**Importante:** isso não é Range verdadeiro na origem. O primeiro acesso precisa terminar o download inteiro antes de começar a reprodução e o seek. O cache fica no armazenamento temporário do serviço e pode ser perdido quando a instância reiniciar.
-
-## Requisitos
-
-- Node.js 20 ou superior
-- Nenhuma dependência npm externa
-
-## Preparar o catálogo
-
-Crie um arquivo local chamado `videos.json` usando a saída do extrator. Ele não é versionado pelo Git porque contém URLs diretas e potencialmente privadas do Google Fotos.
-
-Formato esperado:
-
-```json
-[
-  {
-    "id": "ID_DO_VIDEO",
-    "title": "Vídeo 1",
-    "url": "https://lh3.googleusercontent.com/...",
-    "poster": "https://lh3.googleusercontent.com/...",
-    "width": 720,
-    "height": 900
-  }
-]
-```
-
-O servidor valida que as URLs de origem usem HTTPS e o host `lh3.googleusercontent.com`.
-
-## Executar
+O comando de inicialização é:
 
 ```bash
 npm start
 ```
 
-Rotas:
+A sequência de inicialização é automática:
 
-- `GET /health` - estado do servidor
-- `GET /api/videos` - catálogo sem expor as URLs de origem
-- `GET /stream/ID_DO_VIDEO` - vídeo com suporte a Range no lado do player
+1. `start.js` chama `extractor.js`.
+2. O extrator consulta o álbum definido em `PHOTOS_ALBUM_URL`.
+3. Filtra somente vídeos e grava/atualiza `videos.json`.
+4. Somente depois da extração bem-sucedida, `start.js` importa e inicia `server.js`.
 
-## Hostless
+Se a URL não estiver configurada, o álbum não puder ser consultado ou nenhum vídeo for encontrado, o processo encerra com erro em vez de iniciar com um catálogo vazio/desatualizado.
 
-Configure o comando de inicialização como `npm start`. O serviço deve fornecer a variável `PORT`.
+## Configuração no Hostless
 
-Variáveis opcionais:
+Configure estas variáveis no painel do serviço:
 
-| Variável | Padrão | Descrição |
-|---|---:|---|
-| `PORT` | `8080` | Porta HTTP |
-| `VIDEOS_JSON` | `./videos.json` | Caminho do catálogo |
-| `MAX_VIDEO_BYTES` | `209715200` | Limite por vídeo (200 MiB) |
-| `IPTV_TOKEN` | vazio | Token opcional para proteger API e streams |
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `PHOTOS_ALBUM_URL` | Sim | URL compartilhada do álbum do Google Fotos |
+| `PORT` | Fornecida pelo Hostless | Porta HTTP do serviço |
+| `IPTV_TOKEN` | Não | Token opcional para proteger API e streams |
+| `MAX_VIDEO_BYTES` | Não | Limite por vídeo em bytes, padrão 200 MiB |
 
-Se configurar `IPTV_TOKEN`, envie `Authorization: Bearer SEU_TOKEN` nas requisições. Também é aceito `?token=SEU_TOKEN` para players que não permitem cabeçalhos personalizados.
+Comando de inicialização: `npm start`.
 
-Não coloque o arquivo `videos.json`, tokens ou URLs privadas em um repositório público. Adicione o catálogo diretamente ao ambiente de deploy por um método privado.
+O álbum usado pelo extrator deve estar compartilhado de forma que o serviço consiga acessá-lo. Não coloque a URL do álbum no código nem em commits públicos: configure-a como variável de ambiente no Hostless.
 
-## Limitações
+## Rotas
 
-- Um vídeo inteiro é baixado antes de ser servido. Isso aumenta a latência inicial e consome tráfego e armazenamento temporário.
-- Apenas um vídeo fica no cache temporário por vez.
-- O limite padrão é 200 MiB por vídeo.
-- O servidor não converte codecs nem altera a qualidade do vídeo.
+- `GET /health` - estado do servidor e quantidade de vídeos carregados.
+- `GET /api/videos` - catálogo com título, poster, dimensões e URL interna de streaming.
+- `GET /stream/ID_DO_VIDEO` - vídeo.
+
+Se `IPTV_TOKEN` estiver definido, envie `Authorization: Bearer SEU_TOKEN`. Também é aceito `?token=SEU_TOKEN` para players sem cabeçalhos personalizados.
+
+## Pseudo-206 e cache
+
+O Google Fotos entrega o vídeo com HTTP 200 e não respeita Range. Para emular o comportamento esperado pelo player, o servidor:
+
+1. Baixa o vídeo inteiro no primeiro acesso para cache temporário em disco.
+2. Responde com HTTP 200 para requisições sem Range.
+3. Responde com HTTP 206 e `Content-Range` para requisições com Range.
+4. Mantém apenas o último vídeo em cache para limitar o uso de disco.
+
+Portanto, o primeiro acesso a cada vídeo aguarda o download completo antes de começar a reprodução. O cache usa a pasta temporária do sistema e pode desaparecer quando o Hostless reiniciar ou recriar a instância.
+
+## Desenvolvimento local
+
+Requer Node.js `^22.18.0 || >=24.11.0`.
+
+```bash
+npm install
+PHOTOS_ALBUM_URL="LINK_COMPARTILHADO_DO_ALBUM" npm start
+```
+
+Para executar somente o extrator:
+
+```bash
+PHOTOS_ALBUM_URL="LINK_COMPARTILHADO_DO_ALBUM" npm run extract
+```
+
+O arquivo `videos.json` é gerado automaticamente e está no `.gitignore`, pois contém URLs diretas das mídias.
+
+## Arquivos
+
+- `start.js`: orquestra extração e inicialização do servidor.
+- `extractor.js`: consulta o álbum e gera o catálogo.
+- `server.js`: API e streaming pseudo-206.
+- `videos.example.json`: exemplo de catálogo vazio.
