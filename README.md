@@ -13,11 +13,11 @@ npm start
 A sequência de inicialização é automática:
 
 1. `start.js` chama `extractor.js`.
-2. O extrator consulta o álbum definido em `PHOTOS_ALBUM_URL`.
+2. O extrator consulta o álbum configurado em `PHOTOS_ALBUM_URL`. Se a variável não existir, usa o álbum padrão definido em `start.js`.
 3. Filtra somente vídeos e grava/atualiza `videos.json`.
 4. Somente depois da extração bem-sucedida, `start.js` importa e inicia `server.js`.
 
-Se a URL não estiver configurada, o álbum não puder ser consultado ou nenhum vídeo for encontrado, o processo encerra com erro em vez de iniciar com um catálogo vazio/desatualizado.
+Se o álbum não puder ser consultado ou nenhum vídeo for encontrado, o processo encerra com erro em vez de iniciar com um catálogo vazio/desatualizado.
 
 ## Configuração no Hostless
 
@@ -25,14 +25,14 @@ Configure estas variáveis no painel do serviço:
 
 | Variável | Obrigatória | Descrição |
 |---|---|---|
-| `PHOTOS_ALBUM_URL` | Sim | URL compartilhada do álbum do Google Fotos |
+| `PHOTOS_ALBUM_URL` | Não | URL alternativa do álbum. Se omitida, usa a URL padrão de `start.js` |
 | `PORT` | Fornecida pelo Hostless | Porta HTTP do serviço |
 | `IPTV_TOKEN` | Não | Token opcional para proteger API e streams |
 | `MAX_VIDEO_BYTES` | Não | Limite por vídeo em bytes, padrão 200 MiB |
 
 Comando de inicialização: `npm start`.
 
-O álbum usado pelo extrator deve estar compartilhado de forma que o serviço consiga acessá-lo. Não coloque a URL do álbum no código nem em commits públicos: configure-a como variável de ambiente no Hostless.
+**Privacidade:** o repositório é público e a URL padrão do álbum está escrita em `start.js`. Qualquer pessoa que veja o código também poderá obter essa URL. Para trocar o álbum sem alterar o código, defina `PHOTOS_ALBUM_URL` no painel.
 
 ## Rotas
 
@@ -57,16 +57,22 @@ Portanto, o primeiro acesso a cada vídeo aguarda o download completo antes de c
 
 Requer Node.js `^22.18.0 || >=24.11.0`.
 
+No Termux, instale a versão LTS e as dependências do projeto:
+
 ```bash
+pkg update
+pkg install nodejs-lts
 npm install
-PHOTOS_ALBUM_URL="LINK_COMPARTILHADO_DO_ALBUM" npm start
+npm start
 ```
 
 Para executar somente o extrator:
 
 ```bash
-PHOTOS_ALBUM_URL="LINK_COMPARTILHADO_DO_ALBUM" npm run extract
+npm run extract
 ```
+
+A variável `PHOTOS_ALBUM_URL` pode ser definida para substituir o álbum padrão.
 
 O arquivo `videos.json` é gerado automaticamente e está no `.gitignore`, pois contém URLs diretas das mídias.
 
