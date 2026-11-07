@@ -1,0 +1,13 @@
+{
+  "name": "melissa-iptv",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Servidor de streaming com proxy pseudo-206 para URLs do Google Fotos",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
