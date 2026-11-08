@@ -27,11 +27,10 @@ export async function extractVideos(albumUrl = process.env.PHOTOS_ALBUM_URL) {
   }
 
   console.log("Consultando o álbum do Google Fotos...");
-  const items = await fetchImageUrls(albumUrl, {
-    signal: AbortSignal.timeout(180_000),
-    timeoutMs: 30_000,
-    maxAttempts: 5
-  });
+  const items = await fetchImageUrls(
+    albumUrl,
+    AbortSignal.timeout(180_000)
+  );
 
   if (!Array.isArray(items)) {
     throw new Error("O extrator não conseguiu ler o álbum. Confira se o link está público e tente novamente.");
