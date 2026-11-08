@@ -167,6 +167,7 @@ async function createSession(video) {
   return session;
 }
 async function getSession(video) {
+  await evictIdle();
   let session = sessions.get(video.id);
   if (session && session.closed) {
     sessions.delete(video.id);
