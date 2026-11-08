@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchImageUrls } from "@marcus5914/google-photos-album-image-url-fetch";
 
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
-const OUTPUT = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
+const DATA_DIR = path.join(os.tmpdir(), "melissa-iptv");
+const OUTPUT = path.join(DATA_DIR, "videos.json");
 
 function cleanTitle(value) {
   if (typeof value !== "string") return null;
