@@ -144,6 +144,7 @@ async function createState(video) {
     id: video.id,
     title: video.title,
     total,
+    contentType: response.headers.get("content-type")?.startsWith("video/") ? response.headers.get("content-type") : "video/mp4",
     reader: response.body.getReader(),
     controller,
     chunks: [],
@@ -261,7 +262,7 @@ export async function serveByteStream(req, res, video) {
 
   const partial = Boolean(rangeHeader);
   const headers = {
-    "Content-Type": "video/mp4",
+    "Content-Type": state.contentType,
     "Content-Length": String(end - start + 1),
     "Accept-Ranges": "bytes",
     "Cache-Control": "no-store",
