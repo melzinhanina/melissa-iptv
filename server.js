@@ -85,7 +85,9 @@ const server = http.createServer(async (req, res) => {
     try {
       if (hlsMatch[2] === "index.m3u8") {
         const playlist = await getHlsPlaylist(video);
-        const body = Buffer.from(playlist);
+        const segmentBase = `${PUBLIC_URL}/hls/${encodeURIComponent(video.id)}/`;
+        const playablePlaylist = playlist.replace(/^(segment_\\d{5}\\.ts)$/gm, name => `${segmentBase}${name}${tokenQuery()}`);
+        const body = Buffer.from(playablePlaylist);
         res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8", "Content-Length": body.length, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
         return res.end(body);
       }
