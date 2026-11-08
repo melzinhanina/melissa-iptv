@@ -125,9 +125,12 @@ async function handleHls(req, res, url) {
   }
   const video = findVideo(id);
   if (!video) return sendJson(res, 404, { error: "Vídeo não encontrado." });
+  const filename = parts[2];
+  if (filename !== "index.m3u8" && !/^segment_\\d+\\.ts$/.test(filename)) {
+    return sendJson(res, 404, { error: "Arquivo HLS inválido." });
+  }
 
   const cache = await ensureHls(video);
-  const filename = parts[2];
 
   if (filename === "index.m3u8") {
     let playlist = await fsp.readFile(cache.playlist, "utf8");
@@ -189,7 +192,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname.startsWith("/stream/")) {
-    const id = decodeURIComponent(url.pathname.slice("/stream/".length));
+    let id;
+    try { id = decodeURIComponent(url.pathname.slice("/stream/".length)); } catch {
+      return sendJson(res, 400, { error: "ID inválido." });
+    }
     if (!findVideo(id)) return sendJson(res, 404, { error: "Vídeo não encontrado." });
     res.writeHead(302, { Location: hlsUrl(id), "Cache-Control": "no-store" });
     return res.end();
