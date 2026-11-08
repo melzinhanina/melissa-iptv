@@ -31,7 +31,11 @@ function waitChange(session, ms = 250) {
 }
 async function countSegments(dir) {
   const files = await fs.readdir(dir).catch(() => []);
-  return files.filter(name => /^segment_\d{5}\.ts$/.test(name)).length;
+  const indexes = files
+    .map(name => /^segment_(\d{5})\.ts$/.exec(name))
+    .filter(Boolean)
+    .map(match => Number(match[1]));
+  return indexes.length ? Math.max(...indexes) + 1 : 0;
 }
 async function cleanupSession(session) {
   session.closed = true;
