@@ -15,9 +15,13 @@ jobs:
         with:
           node-version: 24
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: |
+          npm install --no-audit --no-fund
+          npm install-scripts approve ffmpeg-static
       - name: Run regression tests
         run: node --test
+      - name: Verify FFmpeg binary
+        run: node --input-type=module -e 'import { checkFfmpeg } from "./hls.js"; console.log(await checkFfmpeg())'
       - name: Check JavaScript syntax
         run: |
           node --check start.js
