@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchImageUrls } from "@marcus5914/google-photos-album-image-url-fetch";
+import { DATA_DIR } from "./storage-paths.js";
 
-const DATA_DIR = path.join(os.tmpdir(), "melissa-iptv");
 const OUTPUT = path.join(DATA_DIR, "videos.json");
 
 function cleanTitle(value) {
