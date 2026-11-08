@@ -238,14 +238,45 @@ export async function serveHlsSegment(req, res, video, filename) {
       try {
         const stat = await fs.stat(file);
         if (stat.isFile() && stat.size > 0) {
-          res.writeHead(200, {
+          let start = 0;
+          let end = stat.size - 1;
+          let status = 200;
+          const rangeHeader = req.headers.range;
+          if (rangeHeader) {
+            const match = /^bytes=(\\d*)-(\\d*)$/i.exec(rangeHeader.trim());
+            if (!match || (!match[1] && !match[2])) {
+              res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
+              return res.end();
+            }
+            if (!match[1]) {
+              const suffix = Number(match[2]);
+              if (!Number.isSafeInteger(suffix) || suffix <= 0) {
+                res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
+                return res.end();
+              }
+              start = Math.max(0, stat.size - suffix);
+            } else {
+              start = Number(match[1]);
+              end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+            }
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= stat.size) {
+              res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
+              return res.end();
+            }
+            status = 206;
+          }
+          const headers = {
             "Content-Type": "video/mp2t",
-            "Content-Length": stat.size,
+            "Content-Length": end - start + 1,
+            "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=60",
-            "Access-Control-Allow-Origin": "*"
-          });
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range"
+          };
+          if (status === 206) headers["Content-Range"] = `bytes ${start}-${end}/${stat.size}`;
+          res.writeHead(status, headers);
           if (req.method === "HEAD") return res.end();
-          const stream = (await import("node:fs")).createReadStream(file);
+          const stream = (await import("node:fs")).createReadStream(file, { start, end });
           stream.on("error", error => res.destroy(error));
           stream.pipe(res);
           return;
