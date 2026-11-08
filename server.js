@@ -1,5 +1,6 @@
 import http from "node:http";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { DATA_DIR } from "./storage-paths.js";
 import { getHlsPlaylist, serveHlsSegment, hlsStats, checkFfmpeg, closeHls } from "./hls.js";
 
