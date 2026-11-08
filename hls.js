@@ -5,6 +5,8 @@ import ffmpegPath from "ffmpeg-static";
 import { HLS_DIR } from "./storage-paths.js";
 
 const ROOT = HLS_DIR;
+const RUNTIME_FFMPEG_PATH = path.join(path.dirname(HLS_DIR), "bin", "ffmpeg");
+let ffmpegExecutable = null;
 const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_SECONDS) || 6));
 const LIST_SIZE = Math.max(3, Math.min(20, Number(process.env.HLS_LIST_SIZE) || 8));
 const PREFETCH = Math.max(1, Math.min(6, Number(process.env.HLS_PREFETCH_SEGMENTS) || 2));
@@ -143,7 +145,7 @@ async function createSession(video) {
     "-hls_segment_filename", segmentPattern,
     playlistPath
   ];
-  const ffmpeg = spawn(ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
+  const ffmpeg = spawn(ffmpegExecutable || ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
   let stderr = "";
   ffmpeg.stderr.on("data", chunk => {
     stderr = (stderr + chunk.toString()).slice(-6000);
@@ -302,8 +304,27 @@ export function hlsStats() {
 }
 export async function checkFfmpeg() {
   if (!ffmpegPath) throw new Error("ffmpeg-static não forneceu um binário para esta plataforma.");
-  await fs.access(ffmpegPath);
-  return ffmpegPath;
+
+  // O diretório da aplicação no Hostless pode ser somente leitura e/ou noexec.
+  // Copiamos o binário empacotado para /tmp, que é o diretório gravável do runtime.
+  await fs.mkdir(path.dirname(RUNTIME_FFMPEG_PATH), { recursive: true });
+  await fs.copyFile(ffmpegPath, RUNTIME_FFMPEG_PATH);
+  await fs.chmod(RUNTIME_FFMPEG_PATH, 0o755);
+
+  // Não basta verificar se o arquivo existe: executá-lo confirma que não há EACCES.
+  await new Promise((resolve, reject) => {
+    const child = spawn(RUNTIME_FFMPEG_PATH, ["-version"], { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-2000); });
+    child.once("error", reject);
+    child.once("close", code => {
+      if (code === 0) resolve();
+      else reject(new Error(`Não foi possível executar o FFmpeg copiado para /tmp (código ${code}): ${stderr}`));
+    });
+  });
+
+  ffmpegExecutable = RUNTIME_FFMPEG_PATH;
+  return ffmpegExecutable;
 }
 export async function closeHls() {
   const all = [...sessions.values()];
