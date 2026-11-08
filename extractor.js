@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchImageUrls } from "@marcus5914/google-photos-album-image-url-fetch";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const OUTPUT = path.resolve(process.env.VIDEOS_JSON || path.join(ROOT, "videos.json"));
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
+const OUTPUT = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
 
 export async function extractVideos(albumUrl = process.env.PHOTOS_ALBUM_URL) {
   if (!albumUrl) {
