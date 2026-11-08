@@ -14,8 +14,8 @@ Servidor IPTV que extrai vídeos de um álbum público do Google Fotos e gera HL
 ## Importante sobre HTTP
 
 - Google Fotos -> servidor: HTTP 200 em fluxo sequencial.
-- Servidor -> player: playlist HLS e segmentos individuais, normalmente HTTP 200.
-- HTTP 206/Content-Range é para intervalos de bytes de um arquivo. Não é o mecanismo usado para entregar segmentos HLS. A rota HLS não finge ser 206.
+- Servidor -> player: playlist HLS responde HTTP 200. Segmentos TS respondem HTTP 200 quando pedidos inteiros e HTTP 206 real quando o player envia um cabeçalho Range válido, com Content-Range e Accept-Ranges.
+- HTTP 206 é aplicado aos bytes do segmento TS solicitado. A playlist HLS continua sendo HTTP 200.
 
 O controle de entrada é baseado na janela de segmentos: o servidor mantém poucos segmentos à frente do último segmento solicitado pelo player. A leitura da origem pausa quando essa janela está cheia e retoma conforme o player avança. Isso limita o pré-carregamento, embora a rede e os buffers internos do sistema ainda possam absorver pequenas quantidades adicionais.
 
