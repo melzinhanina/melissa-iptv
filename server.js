@@ -1,13 +1,11 @@
 import http from "node:http";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { DATA_DIR } from "./storage-paths.js";
 import { getHlsPlaylist, serveHlsSegment, hlsStats, checkFfmpeg, closeHls } from "./hls.js";
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = "0.0.0.0";
 const PUBLIC_URL = (process.env.PUBLIC_URL || "https://melissa-iptv.hostless.app").replace(/\/$/, "");
-const DATA_DIR = path.join(os.tmpdir(), "melissa-iptv");
 const CATALOG_PATH = path.join(DATA_DIR, "videos.json");
 const TOKEN = process.env.IPTV_TOKEN || "";
 let catalog = [];
