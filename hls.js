@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
+import { HLS_DIR } from "./storage-paths.js";
 
-const ROOT = path.join(os.tmpdir(), "melissa-iptv", "hls");
+const ROOT = HLS_DIR;
 const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_SECONDS) || 6));
 const LIST_SIZE = Math.max(3, Math.min(20, Number(process.env.HLS_LIST_SIZE) || 8));
 const PREFETCH = Math.max(1, Math.min(6, Number(process.env.HLS_PREFETCH_SEGMENTS) || 2));
