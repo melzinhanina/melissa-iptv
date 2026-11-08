@@ -17,7 +17,7 @@ function oldestOffset(state) {
 function trim(state) {
   const minPosition = state.consumers.size
     ? Math.min(...[...state.consumers].map((consumer) => consumer.position))
-    : state.readOffset;
+    : state.lastPosition;
   const keepFrom = Math.max(0, minPosition - RETAIN_BYTES);
   while (state.chunks.length && state.chunks[0].end <= keepFrom) {
     const removed = state.chunks.shift();
@@ -150,6 +150,7 @@ async function createState(video) {
     chunks: [],
     bufferedBytes: 0,
     readOffset: 0,
+    lastPosition: 0,
     consumers: new Set(),
     waiters: new Set(),
     pumping: false,
@@ -287,6 +288,7 @@ export async function serveByteStream(req, res, video) {
       const piece = chunk.data.subarray(offset, offset + (chunkEnd - consumer.position));
       if (!res.write(piece)) await waitForDrain(res);
       consumer.position = chunkEnd;
+      state.lastPosition = chunkEnd;
       state.lastUsed = Date.now();
       trim(state);
       notify(state);
