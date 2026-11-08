@@ -12,14 +12,21 @@ const CATALOG_PATH = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR,
 const TOKEN = process.env.IPTV_TOKEN || "";
 let catalog = [];
 
-async function loadCatalog() {
+async function readCatalog() {
   const raw = await fs.readFile(CATALOG_PATH, "utf8");
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new Error("O catálogo precisa ser um array JSON.");
-  catalog = parsed.map((item, index) => {
-    if (!item || typeof item.id !== "string" || typeof item.url !== "string") throw new Error(`Item ${index} precisa ter id e url.`);
+
+  return parsed.map((item, index) => {
+    if (!item || typeof item.id !== "string" || typeof item.url !== "string") {
+      throw new Error(`Item ${index} precisa ter id e url.`);
+    }
+
     const parsedUrl = new URL(item.url);
-    if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "lh3.googleusercontent.com") throw new Error(`URL não permitida no item ${item.id}.`);
+    if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "lh3.googleusercontent.com") {
+      throw new Error(`URL não permitida no item ${item.id}.`);
+    }
+
     return {
       id: item.id,
       title: String(item.title || `Vídeo ${index + 1}`).replace(/[\r\n]/g, " "),
@@ -30,6 +37,25 @@ async function loadCatalog() {
     };
   });
 }
+
+async function loadCatalog() {
+  const nextCatalog = await readCatalog();
+  catalog = nextCatalog;
+  console.log(`Catálogo carregado: ${catalog.length} vídeo(s).`);
+  return catalog;
+}
+
+export async function reloadCatalog() {
+  try {
+    await loadCatalog();
+    console.log("Catálogo renovado com sucesso.");
+    return true;
+  } catch (error) {
+    console.error("Falha ao renovar catálogo; mantendo a versão anterior:", error.message);
+    return false;
+  }
+}
+
 function sendJson(res, status, data) {
   const body = Buffer.from(JSON.stringify(data));
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
@@ -56,6 +82,7 @@ function createM3u() {
   }
   return lines.join("\n") + "\n";
 }
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "Método não permitido." });
@@ -107,6 +134,7 @@ const server = http.createServer(async (req, res) => {
   }
   return sendJson(res, 404, { error: "Rota não encontrada." });
 });
+
 async function shutdown() {
   server.close(async () => { await closeHls(); process.exit(0); });
 }
