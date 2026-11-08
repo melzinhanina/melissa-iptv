@@ -50,15 +50,7 @@ async function evictIdle() {
       void cleanupSession(s);
     }
   }
-  while (sessions.size >= MAX_SESSIONS) {
-    const idle = [...sessions.entries()]
-      .filter(([, s]) => !s.activeRequests)
-      .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    if (!idle.length) break;
-    const [id, s] = idle[0];
-    sessions.delete(id);
-    await cleanupSession(s);
-  }
+
 }
 function writeChunk(stream, chunk) {
   return new Promise((resolve, reject) => {
