@@ -14,7 +14,7 @@ A sequência de inicialização é automática:
 
 1. `start.js` chama `extractor.js`.
 2. O extrator consulta o álbum configurado em `PHOTOS_ALBUM_URL`. Se a variável não existir, usa o álbum padrão definido em `start.js`.
-3. Filtra somente vídeos e grava/atualiza `videos.json`.
+3. Filtra somente vídeos e grava/atualiza o catálogo em `/tmp/melissa-iptv/videos.json` por padrão.
 4. Somente depois da extração bem-sucedida, `start.js` importa e inicia `server.js`.
 
 Se o álbum não puder ser consultado ou nenhum vídeo for encontrado, o processo encerra com erro em vez de iniciar com um catálogo vazio/desatualizado.
@@ -29,8 +29,18 @@ Configure estas variáveis no painel do serviço:
 | `PORT` | Fornecida pelo Hostless | Porta HTTP do serviço |
 | `IPTV_TOKEN` | Não | Token opcional para proteger API e streams |
 | `MAX_VIDEO_BYTES` | Não | Limite por vídeo em bytes, padrão 200 MiB |
+| `DATA_DIR` | Não | Diretório temporário; padrão `/tmp/melissa-iptv` |
+| `VIDEOS_JSON` | Não | Caminho completo alternativo do catálogo; normalmente deixe sem definir |
 
 Comando de inicialização: `npm start`.
+
+O serviço escuta automaticamente em `0.0.0.0` usando a porta fornecida pelo Hostless. Use o tipo **App**, com detecção automática de Node.js e comando `npm start`.
+
+### Sistema de arquivos
+
+O Hostless mantém a raiz do aplicativo somente leitura. Por isso, o catálogo gerado e o cache de vídeo ficam em `/tmp/melissa-iptv`, nunca dentro da pasta do código.
+
+O diretório `/tmp` é temporário e pode ser limpo quando o processo reiniciar. Isso é intencional: o extrator consulta novamente o álbum sempre que o serviço inicia e reconstrói o catálogo. Não é necessário anexar volume persistente para esse fluxo.
 
 **Privacidade:** o repositório é público e a URL padrão do álbum está escrita em `start.js`. Qualquer pessoa que veja o código também poderá obter essa URL. Para trocar o álbum sem alterar o código, defina `PHOTOS_ALBUM_URL` no painel.
 
@@ -51,7 +61,9 @@ O Google Fotos entrega o vídeo com HTTP 200 e não respeita Range. Para emular 
 3. Responde com HTTP 206 e `Content-Range` para requisições com Range.
 4. Mantém apenas o último vídeo em cache para limitar o uso de disco.
 
-Portanto, o primeiro acesso a cada vídeo aguarda o download completo antes de começar a reprodução. O cache usa a pasta temporária do sistema e pode desaparecer quando o Hostless reiniciar ou recriar a instância.
+Portanto, o primeiro acesso a cada vídeo aguarda o download completo antes de começar a reprodução. O cache usa `/tmp` e pode desaparecer quando o Hostless reiniciar ou recriar a instância. O limite padrão por vídeo é 200 MiB, abaixo do limite temporário de 500 MiB do Hostless.
+
+**FFmpeg não é necessário na versão atual:** o servidor não converte nem corta os vídeos; ele baixa o arquivo original e entrega os intervalos solicitados pelo player.
 
 ## Desenvolvimento local
 
@@ -74,7 +86,7 @@ npm run extract
 
 A variável `PHOTOS_ALBUM_URL` pode ser definida para substituir o álbum padrão.
 
-O arquivo `videos.json` é gerado automaticamente e está no `.gitignore`, pois contém URLs diretas das mídias.
+O arquivo `videos.json` gerado fica no diretório temporário por padrão. Ele contém URLs diretas das mídias e não deve ser versionado.
 
 ## Arquivos
 
