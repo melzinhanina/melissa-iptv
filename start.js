@@ -7,10 +7,10 @@ const PHOTOS_ALBUM_URL =
 const PUBLIC_URL = (process.env.PUBLIC_URL || "https://melissa-iptv.hostless.app").replace(/\/$/, "");
 
 try {
-  console.log("=== Melissa IPTV HLS: inicialização ===");
+  console.log("=== Melissa IPTV Range Streaming: inicialização ===");
   console.log(`Álbum configurado: ${PHOTOS_ALBUM_URL}`);
   await extractVideos(PHOTOS_ALBUM_URL);
-  console.log("Catálogo atualizado. Iniciando servidor e FFmpeg...");
+  console.log("Catálogo atualizado. Iniciando servidor de streaming...");
   console.log(`Acesso público: ${PUBLIC_URL}`);
   console.log(`Playlist IPTV: ${PUBLIC_URL}/playlist.m3u8`);
   await import("./server.js");
