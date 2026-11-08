@@ -7,6 +7,21 @@ import { fetchImageUrls } from "@marcus5914/google-photos-album-image-url-fetch"
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
 const OUTPUT = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
 
+function cleanTitle(value) {
+  if (typeof value !== "string") return null;
+  const title = value.replace(/[\r\n]/g, " ").replace(/\s+/g, " ").trim();
+  return title || null;
+}
+
+function titleFromItem(item, index) {
+  const candidates = [item?.title, item?.name, item?.filename, item?.fileName, item?.description];
+  for (const candidate of candidates) {
+    const title = cleanTitle(candidate);
+    if (title) return title;
+  }
+  return `Vídeo ${index + 1}`;
+}
+
 export async function extractVideos(albumUrl = process.env.PHOTOS_ALBUM_URL) {
   if (!albumUrl) {
     throw new Error("Defina PHOTOS_ALBUM_URL com o link compartilhado do álbum do Google Fotos.");
@@ -33,7 +48,7 @@ export async function extractVideos(albumUrl = process.env.PHOTOS_ALBUM_URL) {
 
       return {
         id: String(item.uid ?? item.id ?? `video-${index + 1}`),
-        title: `Vídeo ${index + 1}`,
+        title: titleFromItem(item, index),
         url: item.videoUrl,
         poster: item.posterUrl ?? item.url ?? null,
         width: Number(item.width) || null,
