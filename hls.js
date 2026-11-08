@@ -156,7 +156,7 @@ async function createSession(video) {
   const session = {
     id: video.id, dir, playlistPath, controller, reader: response.body.getReader(),
     ffmpeg, stderr, requestedThrough: -1, produced: 0, pumping: false,
-    eof: false, error: null, closed: false, waiters: new Set(),
+    eof: false, ffmpegDone: false, error: null, closed: false, waiters: new Set(),
     activeRequests: 0, lastUsed: Date.now()
   };
   ffmpeg.once("error", error => {
@@ -164,6 +164,7 @@ async function createSession(video) {
     signal(session);
   });
   ffmpeg.once("close", code => {
+    session.ffmpegDone = true;
     if (code && !session.eof && !session.closed) {
       session.error = new Error(`FFmpeg encerrou com código ${code}: ${stderr}`);
     }
@@ -202,7 +203,7 @@ async function waitPlaylist(session) {
         if (content.includes(".ts")) return content;
       } catch {}
     }
-    if (session.eof) break;
+    if (session.ffmpegDone) break;
     await waitChange(session, 200);
   }
   throw new Error("FFmpeg ainda não produziu o primeiro segmento HLS.");
