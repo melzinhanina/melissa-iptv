@@ -1,47 +1,56 @@
 # Melissa IPTV
 
-Servidor IPTV que extrai vídeos de um álbum público do Google Fotos e os entrega em HLS usando FFmpeg.
+Servidor IPTV que extrai vídeos de um álbum público do Google Fotos e os entrega por streaming progressivo com suporte a HTTP Range.
 
-## Como funciona
+## Arquitetura
 
-1. `start.js` inicia a aplicação e chama o extrator.
-2. `extractor.js` usa `@marcus5914/google-photos-album-image-url-fetch` para buscar todas as mídias do álbum e montar o catálogo JSON.
-3. Ao solicitar um canal/vídeo pela primeira vez, `hls.js` executa FFmpeg diretamente sobre a URL do Google Fotos.
-4. FFmpeg gera uma playlist HLS VOD (`.m3u8`) e segmentos MPEG-TS (`.ts`) em armazenamento temporário.
-5. `server.js` entrega a playlist IPTV e os segmentos pelo domínio público.
+1. `start.js` atualiza o catálogo usando o extrator do Google Fotos.
+2. O Google Fotos entrega a origem com HTTP 200.
+3. `range-stream.js` lê a origem sob demanda, com backpressure e um buffer circular pequeno por vídeo.
+4. O player solicita intervalos de bytes com o cabeçalho `Range`.
+5. O Melissa IPTV responde HTTP 206 com `Content-Range`, `Content-Length` e `Accept-Ranges: bytes`.
 
-A geração usa `-c copy` para evitar recodificação e reduzir uso de CPU. Isso depende de os codecs do vídeo serem compatíveis com o contêiner MPEG-TS e com o player. O servidor gera um vídeo HLS por vez e mantém somente o último no cache para respeitar o espaço temporário limitado.
+A entrada não é acelerada sem limite: o leitor pausa quando o buffer de avanço está cheio e volta a ler conforme o player consome os bytes. Vários vídeos podem manter pequenos buffers simultaneamente.
+
+## Limitações importantes
+
+- A origem precisa informar um `Content-Length` válido. Sem o tamanho total, não é possível montar um `Content-Range` confiável.
+- A origem do Google Fotos é sequencial (HTTP 200), portanto não oferece busca aleatória real. Se o player pedir um intervalo que já saiu do cache enquanto outro player ainda usa o mesmo vídeo, o servidor responde 416 em vez de inventar dados.
+- Quando não há outro player usando o vídeo, uma solicitação antiga pode reiniciar a leitura da origem desde o começo.
+- O buffer padrão é 2 MiB por vídeo ativo, configurável por `RANGE_BUFFER_BYTES`. O limite padrão é 12 vídeos ativos.
+- Uma requisição sem cabeçalho Range recebe HTTP 200 normal. Requisições com Range válido recebem HTTP 206. Esse é o comportamento HTTP correto.
+- A entrega é do arquivo original, sem FFmpeg nem recodificação. Compatibilidade de codecs depende do player.
 
 ## Hostless
 
 Configure como **App** com:
 
-- Build system: Detect automatically
 - Build command: `npm install`
 - Start command: `npm start`
 - Health check path: `/health`
-- Node.js: versão 24 LTS (o arquivo `.nvmrc` fixa a linha 24)
-- Sem volume persistente obrigatório: catálogo e HLS são recriados a cada inicialização em `/tmp`.
+- Node.js 24 LTS (o arquivo `.nvmrc` fixa a linha 24)
 
-O pacote `ffmpeg-static` baixa o binário FFmpeg adequado durante a instalação das dependências. Não é necessário instalar FFmpeg manualmente no comando de inicialização.
-
-O Hostless mantém o sistema raiz somente leitura. Por isso, os dados temporários ficam em `/tmp/melissa-iptv`. O cache HLS tem limite padrão de 400 MiB para deixar margem dentro do limite de 500 MiB de `/tmp`.
+O sistema raiz do Hostless é somente leitura. O catálogo temporário continua em `/tmp/melissa-iptv`; os buffers dos vídeos ficam na RAM e não precisam de arquivos temporários.
 
 ## Endereços
 
-- Página/estado: `/`
 - Saúde: `/health`
 - Playlist IPTV: `/playlist.m3u8`
 - Playlist alternativa: `/playlist.m3u`
 - Catálogo JSON: `/api/videos`
-- Playlist HLS individual: `/hls/:id/index.m3u8`
-- Segmentos: `/hls/:id/segment_00000.ts`
+- Vídeo com suporte a Range: `/stream/:id`
 
 Endereço público padrão: https://melissa-iptv.hostless.app
 
-## Variáveis opcionais
+## Variáveis
 
-Veja `.env.example`. As principais são `PHOTOS_ALBUM_URL`, `PUBLIC_URL`, `IPTV_TOKEN`, `HLS_SEGMENT_SECONDS`, `MAX_HLS_BYTES` e `HLS_TIMEOUT_MS`.
+- `PHOTOS_ALBUM_URL`: álbum público do Google Fotos.
+- `PUBLIC_URL`: endereço público do app.
+- `IPTV_TOKEN`: token opcional de acesso.
+- `DATA_DIR`: diretório temporário gravável.
+- `RANGE_BUFFER_BYTES`: buffer máximo de avanço por vídeo ativo (padrão 2 MiB).
+- `MAX_ACTIVE_STREAMS`: máximo de vídeos com leitores ativos (padrão 12).
+- `RANGE_STATE_TTL_MS`: tempo de retenção de estado inativo (padrão 10 minutos).
 
 ## Execução local
 
@@ -49,11 +58,3 @@ Veja `.env.example`. As principais são `PHOTOS_ALBUM_URL`, `PUBLIC_URL`, `IPTV_
 npm install
 npm start
 ```
-
-## Observações
-
-- O álbum do Google Fotos precisa estar compartilhado publicamente.
-- A ferramenta de extração retorna URLs temporárias do Google Fotos; o catálogo é reconstruído ao iniciar.
-- A primeira abertura de cada vídeo aguarda a geração completa do HLS VOD. Depois, o player pode buscar segmentos individualmente e retomar a reprodução usando a playlist.
-- A troca para outro vídeo substitui o cache anterior.
-- Não há transcodificação por padrão. Vídeos com codecs não aceitos pelo player podem precisar de uma futura opção de conversão, que consumirá mais CPU e espaço.
