@@ -7,9 +7,12 @@ import ffmpegPath from "ffmpeg-static";
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
 const HLS_DIR = path.join(DATA_DIR, "hls");
-const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_SECONDS || 6)));
-const MAX_HLS_BYTES = Math.max(32 * 1024 * 1024, Number(process.env.MAX_HLS_BYTES || 400 * 1024 * 1024));
-const GENERATION_TIMEOUT_MS = Math.max(60_000, Number(process.env.HLS_TIMEOUT_MS || 15 * 60 * 1000));
+const segmentSetting = Number(process.env.HLS_SEGMENT_SECONDS || 6);
+const SEGMENT_SECONDS = Number.isFinite(segmentSetting) ? Math.max(2, Math.min(15, segmentSetting)) : 6;
+const sizeSetting = Number(process.env.MAX_HLS_BYTES || 400 * 1024 * 1024);
+const MAX_HLS_BYTES = Number.isFinite(sizeSetting) ? Math.max(32 * 1024 * 1024, sizeSetting) : 400 * 1024 * 1024;
+const timeoutSetting = Number(process.env.HLS_TIMEOUT_MS || 15 * 60 * 1000);
+const GENERATION_TIMEOUT_MS = Number.isFinite(timeoutSetting) ? Math.max(60_000, timeoutSetting) : 15 * 60 * 1000;
 
 let activeCache = null;
 let generation = null;
@@ -92,7 +95,7 @@ async function runFfmpeg(video, outputDir) {
         }
       } catch {}
       monitorRunning = false;
-    }, 1000);
+    }, 500);
     monitor.unref?.();
 
     const timeout = setTimeout(() => child.kill("SIGKILL"), GENERATION_TIMEOUT_MS);
