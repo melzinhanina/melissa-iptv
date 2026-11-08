@@ -1,10 +1,9 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 const BUFFER_BYTES = Math.max(256 * 1024, Math.min(16 * 1024 * 1024, Number(process.env.RANGE_BUFFER_BYTES) || 2 * 1024 * 1024));
 const RETAIN_BYTES = Math.min(512 * 1024, Math.floor(BUFFER_BYTES / 4));
 const MAX_ACTIVE_STREAMS = Math.max(1, Math.min(32, Number(process.env.MAX_ACTIVE_STREAMS) || 12));
 const STATE_TTL_MS = Math.max(60_000, Number(process.env.RANGE_STATE_TTL_MS) || 10 * 60 * 1000);
 const states = new Map();
+const creating = new Map();
 
 function notify(state) {
   for (const wake of state.waiters) wake();
@@ -69,7 +68,6 @@ async function pump(state) {
 
 async function waitForChunk(state, position) {
   while (true) {
-    if (state.error) throw state.error;
     if (position < oldestOffset(state)) {
       const error = new Error("O intervalo solicitado já saiu do cache circular.");
       error.code = "RANGE_EXPIRED";
@@ -77,6 +75,7 @@ async function waitForChunk(state, position) {
     }
     const chunk = findChunk(state, position);
     if (chunk) return chunk;
+    if (state.error) throw state.error;
     if (state.eof) return null;
 
     const waiting = new Promise((resolve) => state.waiters.add(resolve));
@@ -92,8 +91,25 @@ async function dispose(state) {
 }
 
 async function createState(video) {
+  const now = Date.now();
+  for (const [id, item] of states) {
+    if (item.consumers.size === 0 && now - item.lastUsed > STATE_TTL_MS) {
+      states.delete(id);
+      void dispose(item);
+    }
+  }
+  if (states.size >= MAX_ACTIVE_STREAMS * 2) {
+    const idle = [...states.entries()]
+      .filter(([, item]) => item.consumers.size === 0)
+      .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    while (states.size >= MAX_ACTIVE_STREAMS * 2 && idle.length) {
+      const [id, item] = idle.shift();
+      states.delete(id);
+      void dispose(item);
+    }
+  }
   const active = [...states.values()].filter((item) => item.consumers.size > 0).length;
-  if (active >= MAX_ACTIVE_STREAMS) {
+  if (active + creating.size >= MAX_ACTIVE_STREAMS) {
     const error = new Error("Limite de vídeos simultâneos atingido. Tente novamente em instantes.");
     error.statusCode = 503;
     throw error;
@@ -151,7 +167,18 @@ async function getState(video) {
     await dispose(state);
     state = null;
   }
-  if (!state) state = await createState(video);
+  if (!state) {
+    let pending = creating.get(video.id);
+    if (!pending) {
+      pending = createState(video);
+      creating.set(video.id, pending);
+    }
+    try {
+      state = await pending;
+    } finally {
+      if (creating.get(video.id) === pending) creating.delete(video.id);
+    }
+  }
   state.lastUsed = Date.now();
   return state;
 }
