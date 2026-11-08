@@ -126,7 +126,7 @@ async function handleHls(req, res, url) {
   const video = findVideo(id);
   if (!video) return sendJson(res, 404, { error: "Vídeo não encontrado." });
   const filename = parts[2];
-  if (filename !== "index.m3u8" && !/^segment_\\d+\\.ts$/.test(filename)) {
+  if (filename !== "index.m3u8" && !/^segment_\d+\.ts$/.test(filename)) {
     return sendJson(res, 404, { error: "Arquivo HLS inválido." });
   }
 
