@@ -243,7 +243,7 @@ export async function serveHlsSegment(req, res, video, filename) {
           let status = 200;
           const rangeHeader = req.headers.range;
           if (rangeHeader) {
-            const match = /^bytes=(\\d*)-(\\d*)$/i.exec(rangeHeader.trim());
+            const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
             if (!match || (!match[1] && !match[2])) {
               res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
               return res.end();
