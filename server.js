@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = "0.0.0.0";
+const PUBLIC_URL = (process.env.PUBLIC_URL || "https://melissa-iptv.hostless.app").replace(/\/$/, "");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
 const CATALOG_PATH = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
 const CACHE_DIR = path.join(DATA_DIR, "cache");
@@ -246,7 +247,7 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/api/videos") {
     return sendJson(res, 200, catalog.map(({ id, title, poster, width, height }) => ({
-      id, title, poster, width, height, stream: `/stream/${encodeURIComponent(id)}`
+      id, title, poster, width, height, stream: `${PUBLIC_URL}/stream/${encodeURIComponent(id)}`
     })));
   }
 
@@ -259,6 +260,7 @@ const server = http.createServer(async (req, res) => {
 
   return sendJson(res, 200, {
     name: "Melissa IPTV",
+    url: PUBLIC_URL,
     endpoints: ["/health", "/api/videos", "/stream/:id"],
     note: "O primeiro acesso baixa o vídeo inteiro para cache temporário; depois o servidor entrega respostas 200/206."
   });
@@ -267,6 +269,7 @@ const server = http.createServer(async (req, res) => {
 loadCatalog().then(() => {
   server.listen(PORT, HOST, () => {
     console.log(`Melissa IPTV ouvindo em http://${HOST}:${PORT}`);
+    console.log(`Endereço público: ${PUBLIC_URL}`);
     console.log(`Vídeos carregados: ${catalog.length}`);
     console.log(`Diretório temporário: ${DATA_DIR}`);
     if (TOKEN) console.log("Proteção por IPTV_TOKEN habilitada.");
