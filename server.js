@@ -7,8 +7,8 @@ import { getHlsPlaylist, serveHlsSegment, hlsStats, checkFfmpeg, closeHls } from
 const PORT = Number(process.env.PORT || 8080);
 const HOST = "0.0.0.0";
 const PUBLIC_URL = (process.env.PUBLIC_URL || "https://melissa-iptv.hostless.app").replace(/\/$/, "");
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
-const CATALOG_PATH = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
+const DATA_DIR = path.join(os.tmpdir(), "melissa-iptv");
+const CATALOG_PATH = path.join(DATA_DIR, "videos.json");
 const TOKEN = process.env.IPTV_TOKEN || "";
 let catalog = [];
 
