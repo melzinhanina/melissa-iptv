@@ -8,15 +8,15 @@ import { pipeline } from "node:stream/promises";
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = "0.0.0.0";
-const CATALOG_PATH = path.resolve(process.env.VIDEOS_JSON || "./videos.json");
-const CACHE_DIR = path.join(os.tmpdir(), "melissa-iptv-cache");
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(os.tmpdir(), "melissa-iptv"));
+const CATALOG_PATH = path.resolve(process.env.VIDEOS_JSON || path.join(DATA_DIR, "videos.json"));
+const CACHE_DIR = path.join(DATA_DIR, "cache");
 const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_BYTES || 200 * 1024 * 1024);
 const TOKEN = process.env.IPTV_TOKEN || "";
 
 let catalog = [];
 let cached = null;
 let inflight = null;
-let inflightId = null;
 
 async function loadCatalog() {
   let raw;
@@ -155,17 +155,13 @@ async function ensureCached(video) {
     return ensureCached(video);
   }
 
-  inflightId = video.id;
   const job = downloadToCache(video);
   inflight = job;
 
   try {
     return await job;
   } finally {
-    if (inflight === job) {
-      inflight = null;
-      inflightId = null;
-    }
+    if (inflight === job) inflight = null;
   }
 }
 
@@ -272,6 +268,7 @@ loadCatalog().then(() => {
   server.listen(PORT, HOST, () => {
     console.log(`Melissa IPTV ouvindo em http://${HOST}:${PORT}`);
     console.log(`Vídeos carregados: ${catalog.length}`);
+    console.log(`Diretório temporário: ${DATA_DIR}`);
     if (TOKEN) console.log("Proteção por IPTV_TOKEN habilitada.");
   });
 }).catch((error) => {
