@@ -66,7 +66,7 @@ function writeChunk(stream, chunk) {
     stream.once("error", reject);
   });
 }
-async function pump(session) {
+export async function pump(session) {
   if (session.pumping || session.closed) return;
   session.pumping = true;
   try {
@@ -87,12 +87,21 @@ async function pump(session) {
       }
       const data = Buffer.from(item.value);
       // Fragmentar a entrada evita despejar um bloco grande no pipe do FFmpeg de uma vez.
-      for (let offset = 0; offset < data.length && !session.closed; offset += 64 * 1024) {
+      for (let offset = 0; offset < data.length && !session.closed && !session.error; offset += 64 * 1024) {
         const part = data.subarray(offset, Math.min(offset + 64 * 1024, data.length));
         await writeChunk(session.ffmpeg.stdin, part);
         await new Promise(resolve => setTimeout(resolve, 35));
         session.produced = await countSegments(session.dir);
-        if (session.produced > session.requestedThrough + PREFETCH) break;
+
+        // Não descarte o restante do bloco já lido: aguarde o player avançar.
+        while (
+          !session.closed &&
+          !session.error &&
+          session.produced > session.requestedThrough + PREFETCH
+        ) {
+          await waitChange(session, 500);
+          session.produced = await countSegments(session.dir);
+        }
       }
       signal(session);
     }
