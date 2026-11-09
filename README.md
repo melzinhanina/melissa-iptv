@@ -24,7 +24,7 @@ O controle de entrada é baseado na janela de segmentos: o servidor mantém pouc
 - HLS segmentado em 6 segundos por padrão.
 - Playlist deslizante com 8 segmentos por padrão.
 - Pré-carregamento de 2 segmentos além do avanço do player.
-- Até 8 sessões de vídeo simultâneas por padrão.
+- Não há limite fixo de sessões HLS simultâneas; sessões ociosas continuam sendo removidas após o TTL configurado.
 - Arquivos temporários em `/tmp/melissa-iptv/hls`.
 - FFmpeg usa `-c copy`: não há recodificação pesada.
 - O cache é temporário e pode ser apagado quando o app reiniciar.
@@ -58,7 +58,6 @@ O sistema raiz do Hostless é somente leitura. O projeto grava somente em `/tmp`
 - `HLS_SEGMENT_SECONDS`: duração-alvo dos segmentos (2 a 15 segundos).
 - `HLS_LIST_SIZE`: quantidade de segmentos na playlist.
 - `HLS_PREFETCH_SEGMENTS`: segmentos de avanço mantidos no buffer.
-- `MAX_HLS_SESSIONS`: sessões simultâneas.
 - `HLS_SESSION_TTL_MS`: retenção de sessões ociosas.
 
 ## Execução
