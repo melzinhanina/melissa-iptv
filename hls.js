@@ -10,7 +10,6 @@ let ffmpegExecutable = null;
 const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_SECONDS) || 6));
 const LIST_SIZE = Math.max(3, Math.min(20, Number(process.env.HLS_LIST_SIZE) || 8));
 const PREFETCH = Math.max(1, Math.min(6, Number(process.env.HLS_PREFETCH_SEGMENTS) || 2));
-const MAX_SESSIONS = Math.max(1, Math.min(12, Number(process.env.MAX_HLS_SESSIONS) || 8));
 const SESSION_TTL = Math.max(60_000, Number(process.env.HLS_SESSION_TTL_MS) || 10 * 60 * 1000);
 const sessions = new Map();
 const creating = new Map();
@@ -118,11 +117,6 @@ export async function pump(session) {
 }
 async function createSession(video) {
   await evictIdle();
-  if (sessions.size >= MAX_SESSIONS) {
-    const error = new Error("Limite de sessões HLS simultâneas atingido.");
-    error.statusCode = 503;
-    throw error;
-  }
   await fs.mkdir(ROOT, { recursive: true });
   const dir = path.join(ROOT, encodeURIComponent(video.id).replace(/%/g, "_"));
   await fs.rm(dir, { recursive: true, force: true });
