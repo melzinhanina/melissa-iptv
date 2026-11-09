@@ -22,7 +22,7 @@ O controle de entrada é baseado na janela de segmentos: o servidor mantém pouc
 ## Cache e limites
 
 - HLS segmentado em 6 segundos por padrão.
-- Playlist deslizante com 8 segmentos por padrão.
+- Playlist deslizante com 120 segmentos por padrão (aproximadamente 12 minutos com segmentos-alvo de 6 segundos).
 - Pré-carregamento de 2 segmentos além do avanço do player.
 - Não há limite fixo de sessões HLS simultâneas; sessões ociosas continuam sendo removidas após o TTL configurado.
 - Arquivos temporários em `/tmp/melissa-iptv/hls`.
