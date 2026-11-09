@@ -1,14 +1,8 @@
 import { extractVideos } from "./extractor.js";
 
-const PHOTOS_ALBUM_URL =
-  process.env.PHOTOS_ALBUM_URL ||
-  "https://photos.app.goo.gl/ajtsMofx5CtcwDdh8";
-
+const PHOTOS_ALBUM_URL = "https://photos.app.goo.gl/ajtsMofx5CtcwDdh8";
 const PUBLIC_URL = (process.env.PUBLIC_URL || "https://melissa-iptv.hostless.app").replace(/\/$/, "");
-const REFRESH_INTERVAL_MS = Math.max(
-  5 * 60 * 1000,
-  Number(process.env.CATALOG_REFRESH_MS) || 30 * 60 * 1000
-);
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 try {
   console.log("=== Melissa IPTV Range Streaming: inicialização ===");
@@ -40,7 +34,7 @@ try {
   };
 
   setInterval(refreshCatalog, REFRESH_INTERVAL_MS);
-  console.log(`Renovação automática do catálogo: a cada ${Math.round(REFRESH_INTERVAL_MS / 60000)} minutos.`);
+  console.log("Renovação automática do catálogo: a cada 5 minutos.");
 } catch (error) {
   console.error("Inicialização cancelada:", error);
   process.exit(1);
