@@ -48,11 +48,12 @@ O sistema raiz do Hostless é somente leitura. O projeto grava somente em `/tmp`
 - `/hls/:id/index.m3u8`
 - `/hls/:id/segment_00000.ts`
 
-## Variáveis
+## Configuração
 
-- `PHOTOS_ALBUM_URL`: álbum público do Google Fotos.
-- `PUBLIC_URL`: endereço público do app.
-- `IPTV_TOKEN`: token opcional.
+- O link do álbum público do Google Fotos fica diretamente no código em `start.js`.
+- A lista de vídeos é renovada automaticamente a cada 5 minutos.
+- `PUBLIC_URL`: endereço público do app (opcional).
+- `IPTV_TOKEN`: token opcional para proteção dos endpoints, se habilitado.
 - `DATA_DIR`: diretório temporário do catálogo.
 - `HLS_DIR`: diretório temporário dos segmentos.
 - `HLS_SEGMENT_SECONDS`: duração-alvo dos segmentos (2 a 15 segundos).
