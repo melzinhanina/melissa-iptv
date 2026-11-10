@@ -1,63 +1,65 @@
-# Melissa IPTV Tunnel
+# Melissa IPTV Relay
 
-Túnel reverso simples em Node.js para permitir que um serviço HTTP local no Termux seja acessado através de um servidor público.
+Relay HTTP de bytes. O Hostless recebe um fluxo em `/enviar/:id` e repassa o mesmo conteúdo para quem estiver conectado em `/receber/:id`.
 
-## Arquitetura
+O relay não interpreta vídeo, HLS, playlists ou segmentos.
 
+## Rotas
+
+- `POST /enviar/:id`: recebe o fluxo. Exige `Authorization: Bearer TOKEN`.
+- `GET /receber/:id`: recebe o mesmo fluxo. A conexão espera até o remetente chegar.
+- `GET /health`: verifica se o processo está ativo.
+
+Um remetente e um receptor por identificador. O fluxo usa memória temporária e backpressure do Node.js. Quando um lado desconecta antes do fim, o outro lado também é encerrado.
+
+## Hostless
+
+Configure as variáveis:
+
+```env
+PORT=18080
+TUNNEL_TOKEN=um-token-grande-e-privado
 ```
-Aplicativo IPTV
-      │
-      ▼
-Servidor público
-melissa-iptv
-      │
-      │ WebSocket persistente
-      ▼
-Termux
-      │
-      ▼
-127.0.0.1:8000
-serviço IPTV local
-```
 
-O Termux inicia a conexão de saída com o servidor público. Isso evita depender de uma conexão de entrada direta no celular.
-
-## Servidor público
+Instale e inicie:
 
 ```bash
 npm install
-TUNNEL_TOKEN="um-token-grande" npm start
+npm start
 ```
 
-O servidor ficará aguardando na porta definida por `PORT`.
+## Termux
 
-## Cliente no Termux
+Configure:
+
+```env
+SOURCE_URL=http://127.0.0.1:8000/video1
+RELAY_URL=https://SEU_HOSTLESS
+STREAM_ID=video1
+TUNNEL_TOKEN=O_MESMO_TOKEN_DO_HOSTLESS
+```
+
+Inicie o envio:
 
 ```bash
-npm install
-TUNNEL_URL="wss://SEU_HOST/tunnel" \
-TUNNEL_TOKEN="o-mesmo-token" \
-LOCAL_ORIGIN="http://127.0.0.1:8000" \
 npm run client
 ```
 
-O cliente mantém a conexão WebSocket e reconecta automaticamente se ela cair.
+O cliente lê a resposta da origem local e transmite os bytes ao Hostless sem interpretar o conteúdo.
 
-## Segurança
+## Player
 
-O endpoint do tunnel exige `TUNNEL_TOKEN`. Não coloque o token no Git.
+Use o endereço:
 
-O servidor público apenas repassa as requisições HTTP recebidas para o serviço local indicado pelo cliente.
+```
+https://SEU_HOSTLESS/receber/video1
+```
 
-## Próxima etapa
+O identificador precisa ser igual ao `STREAM_ID` usado pelo Termux.
 
-Depois de validar o tunnel básico, podemos adicionar:
-- health check;
-- heartbeat;
-- múltiplos clientes/tunnels;
-- controle de conexões;
-- streaming mais eficiente;
-- suporte explícito a Range/206;
-- métricas;
-- limites de tamanho;
-- autenticação separada do endpoint público.
+## Limitações desta primeira versão
+
+- Um remetente e um receptor simultâneos por identificador.
+- O fluxo não fica armazenado permanentemente.
+- O receptor precisa permanecer conectado durante a transmissão.
+- O Hostless não implementa cache, autenticação do player, Range ou retomada de transferência.
