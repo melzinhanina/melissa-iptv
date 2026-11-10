@@ -1,32 +1,31 @@
 # Melissa IPTV
 
-Servidor IPTV que extrai vídeos de um álbum público do Google Fotos e gera HLS progressivamente, sem baixar o vídeo inteiro antes da reprodução.
+Servidor IPTV que extrai vídeos de um álbum público do Google Fotos e entrega HLS VOD com geração de segmentos sob demanda.
 
 ## Arquitetura
 
 1. `start.js` atualiza o catálogo com o extrator do Google Fotos.
-2. O servidor abre a URL de vídeo do Google Fotos, que responde HTTP 200.
-3. O corpo da resposta é lido em blocos pequenos e enviado ao stdin do FFmpeg.
-4. O FFmpeg usa `-c copy` e gera segmentos HLS sem recodificar o vídeo.
-5. O servidor mantém uma janela curta de segmentos por vídeo e só continua lendo a origem quando o player avança e pede mais conteúdo.
-6. Vários vídeos podem manter sessões e pequenos caches independentes ao mesmo tempo.
+2. O servidor consulta a duração do vídeo diretamente na URL pública do Google Fotos usando FFmpeg.
+3. A playlist HLS VOD é montada com a duração completa do vídeo.
+4. Cada segmento TS é gerado somente quando o player o solicita.
+5. Para gerar um segmento, o FFmpeg abre a URL original e aplica seek de entrada para buscar o trecho correspondente, em vez de receber o vídeo por `pipe:0`.
+6. Os segmentos gerados ficam em cache em `/tmp/melissa-iptv/hls` durante a sessão. Se a sessão expirar, o trecho pode ser gerado novamente quando solicitado.
 
-## Importante sobre HTTP
+## Seek e acesso HTTP
 
-- Google Fotos -> servidor: HTTP 200 em fluxo sequencial.
-- Servidor -> player: playlist HLS responde HTTP 200. Segmentos TS respondem HTTP 200 quando pedidos inteiros e HTTP 206 real quando o player envia um cabeçalho Range válido, com Content-Range e Accept-Ranges.
-- HTTP 206 é aplicado aos bytes do segmento TS solicitado. A playlist HLS continua sendo HTTP 200.
-
-O controle de entrada é baseado na janela de segmentos: o servidor mantém poucos segmentos à frente do último segmento solicitado pelo player. A leitura da origem pausa quando essa janela está cheia e retoma conforme o player avança. Isso limita o pré-carregamento, embora a rede e os buffers internos do sistema ainda possam absorver pequenas quantidades adicionais.
+- A playlist é VOD e lista os segmentos do vídeo inteiro.
+- O player pode solicitar segmentos de qualquer posição, inclusive trechos que ainda não foram gerados.
+- O servidor gera o segmento solicitado a partir da URL original do Google Fotos e guarda o resultado em cache.
+- O seek depende de a origem do Google Fotos permitir que o FFmpeg faça acesso por posição (HTTP Range). Se a origem não oferecer esse recurso para determinado vídeo, a busca poderá ficar lenta ou falhar.
+- Segmentos TS aceitam cabeçalho Range e respondem HTTP 206 quando o intervalo solicitado é válido. A playlist HLS responde HTTP 200.
 
 ## Cache e limites
 
 - HLS segmentado em 6 segundos por padrão.
-- Playlist deslizante com 120 segmentos por padrão (aproximadamente 12 minutos com segmentos-alvo de 6 segundos).
-- Pré-carregamento de 2 segmentos além do avanço do player.
-- Não há limite fixo de sessões HLS simultâneas; sessões ociosas continuam sendo removidas após o TTL configurado.
-- Arquivos temporários em `/tmp/melissa-iptv/hls`.
-- FFmpeg usa `-c copy`: não há recodificação pesada.
+- Os segmentos são gerados sob demanda, não é necessário baixar o vídeo inteiro antes de iniciar a reprodução.
+- Segmentos gerados permanecem em `/tmp/melissa-iptv/hls` enquanto a sessão estiver ativa.
+- Sessões ociosas são removidas após o TTL configurado.
+- FFmpeg usa `-c copy`, sem recodificação de vídeo.
 - O cache é temporário e pode ser apagado quando o app reiniciar.
 
 ## Hostless
@@ -37,7 +36,7 @@ Configure como **App**:
 - Health check: `/health`
 - Node.js 24 LTS.
 
-O sistema raiz do Hostless é somente leitura. O projeto grava somente em `/tmp`.
+O sistema raiz do Hostless pode ser somente leitura. O projeto grava somente em `/tmp`.
 
 ## Endpoints
 
@@ -57,8 +56,6 @@ O sistema raiz do Hostless é somente leitura. O projeto grava somente em `/tmp`
 - `DATA_DIR`: diretório temporário do catálogo.
 - `HLS_DIR`: diretório temporário dos segmentos.
 - `HLS_SEGMENT_SECONDS`: duração-alvo dos segmentos (2 a 15 segundos).
-- `HLS_LIST_SIZE`: quantidade de segmentos na playlist.
-- `HLS_PREFETCH_SEGMENTS`: segmentos de avanço mantidos no buffer.
 - `HLS_SESSION_TTL_MS`: retenção de sessões ociosas.
 
 ## Execução
