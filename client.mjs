@@ -2,12 +2,11 @@ import http from "node:http";
 import https from "node:https";
 
 const SOURCE_URL = process.env.SOURCE_URL;
-const RELAY_URL = process.env.RELAY_URL;
-const STREAM_ID = process.env.STREAM_ID;
-const TUNNEL_TOKEN = process.env.TUNNEL_TOKEN;
+const RELAY_URL = process.env.RELAY_URL || "https://melissa-iptv.hostless.app";
+const STREAM_ID = process.env.STREAM_ID || "video1";
 
-if (!SOURCE_URL || !RELAY_URL || !STREAM_ID || !TUNNEL_TOKEN) {
-  console.error("Configure SOURCE_URL, RELAY_URL, STREAM_ID e TUNNEL_TOKEN.");
+if (!SOURCE_URL) {
+  console.error("Configure SOURCE_URL.");
   process.exit(1);
 }
 
@@ -26,7 +25,6 @@ const sourceRequest = sourceTransport.get(sourceUrl, sourceResponse => {
   }
 
   const headers = {
-    authorization: `Bearer ${TUNNEL_TOKEN}`,
     "content-type": sourceResponse.headers["content-type"] || "application/octet-stream"
   };
 
@@ -39,7 +37,7 @@ const sourceRequest = sourceTransport.get(sourceUrl, sourceResponse => {
     headers
   }, response => {
     console.log(`Relay respondeu HTTP ${response.statusCode}`);
-    response.pipe(process.stdout);
+    response.resume();
     response.on("end", () => {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         process.exitCode = 1;
