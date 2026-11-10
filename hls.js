@@ -72,11 +72,6 @@ export async function pump(session) {
     while (!session.closed && !session.eof && !session.error) {
       const produced = await countSegments(session.dir);
       session.produced = produced;
-      // Mantém somente uma pequena janela à frente do último segmento pedido pelo player.
-      if (produced > session.requestedThrough + PREFETCH) {
-        await waitChange(session, 500);
-        continue;
-      }
       const item = await session.reader.read();
       if (item.done) {
         session.eof = true;
@@ -92,15 +87,6 @@ export async function pump(session) {
         await new Promise(resolve => setTimeout(resolve, 35));
         session.produced = await countSegments(session.dir);
 
-        // Não descarte o restante do bloco já lido: aguarde o player avançar.
-        while (
-          !session.closed &&
-          !session.error &&
-          session.produced > session.requestedThrough + PREFETCH
-        ) {
-          await waitChange(session, 500);
-          session.produced = await countSegments(session.dir);
-        }
       }
       signal(session);
     }
@@ -142,9 +128,9 @@ async function createSession(video) {
     "-c", "copy",
     "-f", "hls",
     "-hls_time", String(SEGMENT_SECONDS),
-    "-hls_list_size", String(LIST_SIZE),
-    "-hls_delete_threshold", "2",
-    "-hls_flags", "delete_segments+append_list+independent_segments+temp_file",
+    "-hls_list_size", "0",
+    "-hls_playlist_type", "vod",
+    "-hls_flags", "append_list+independent_segments+temp_file",
     "-hls_segment_filename", segmentPattern,
     playlistPath
   ];
@@ -233,9 +219,8 @@ export async function serveHlsSegment(req, res, video, filename) {
   signal(session);
   void pump(session);
   const file = path.join(session.dir, filename);
-  const deadline = Date.now() + 45_000;
   try {
-    while (Date.now() < deadline) {
+    while (!session.closed) {
       if (session.error) throw session.error;
       try {
         const stat = await fs.stat(file);
