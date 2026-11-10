@@ -8,8 +8,6 @@ const ROOT = HLS_DIR;
 const RUNTIME_FFMPEG_PATH = path.join(path.dirname(HLS_DIR), "bin", "ffmpeg");
 let ffmpegExecutable = null;
 const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_SECONDS) || 6));
-const LIST_SIZE = Math.max(3, Math.min(120, Number(process.env.HLS_LIST_SIZE) || 120));
-const PREFETCH = Math.max(1, Math.min(6, Number(process.env.HLS_PREFETCH_SEGMENTS) || 2));
 const SESSION_TTL = Math.max(60_000, Number(process.env.HLS_SESSION_TTL_MS) || 10 * 60 * 1000);
 const sessions = new Map();
 const creating = new Map();
@@ -70,8 +68,6 @@ export async function pump(session) {
   session.pumping = true;
   try {
     while (!session.closed && !session.eof && !session.error) {
-      const produced = await countSegments(session.dir);
-      session.produced = produced;
       const item = await session.reader.read();
       if (item.done) {
         session.eof = true;
@@ -85,8 +81,6 @@ export async function pump(session) {
         const part = data.subarray(offset, Math.min(offset + 64 * 1024, data.length));
         await writeChunk(session.ffmpeg.stdin, part);
         await new Promise(resolve => setTimeout(resolve, 35));
-        session.produced = await countSegments(session.dir);
-
       }
       signal(session);
     }
@@ -286,8 +280,8 @@ export function hlsStats() {
     sessions: sessions.size,
     activeRequests: [...sessions.values()].reduce((n, s) => n + s.activeRequests, 0),
     segmentSeconds: SEGMENT_SECONDS,
-    playlistWindow: LIST_SIZE,
-    prefetchSegments: PREFETCH
+    playlistMode: "vod",
+    segmentRetention: "all"
   };
 }
 export async function checkFfmpeg() {
