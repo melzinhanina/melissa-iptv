@@ -14,9 +14,9 @@ Um remetente e um receptor por identificador. O fluxo usa memória temporária e
 
 ## Hostless
 
-```env
-PORT=18080
-```
+O servidor usa a porta fornecida pela plataforma Hostless (`PORT`). Não precisa de arquivo de configuração.
+
+Inicie com:
 
 ```bash
 npm install
@@ -25,11 +25,13 @@ npm start
 
 ## Termux
 
-```env
-SOURCE_URL=http://127.0.0.1:8000/video1
-RELAY_URL=https://melissa-iptv.hostless.app
-STREAM_ID=video1
-```
+As configurações do cliente ficam diretamente no início de `client.mjs`:
+
+- `SOURCE_URL`: endereço da origem local.
+- `RELAY_URL`: endereço público do relay.
+- `STREAM_ID`: identificador do fluxo.
+
+Edite esses valores no próprio arquivo e inicie:
 
 ```bash
 npm run client
