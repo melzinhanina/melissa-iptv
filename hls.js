@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
-import ffprobePath from "@derhuerst/ffprobe-static";
 import { HLS_DIR } from "./storage-paths.js";
 
 const ROOT = HLS_DIR;
@@ -12,24 +11,6 @@ const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_
 const SESSION_TTL = Math.max(60_000, Number(process.env.HLS_SESSION_TTL_MS) || 10 * 60 * 1000);
 const sessions = new Map();
 const creating = new Map();
-const MAX_CONCURRENT_PROBES = 2;
-let activeProbes = 0;
-const probeWaiters = [];
-
-async function withProbeSlot(task) {
-  if (activeProbes >= MAX_CONCURRENT_PROBES) {
-    await new Promise(resolve => probeWaiters.push(resolve));
-  } else {
-    activeProbes++;
-  }
-  try {
-    return await task();
-  } finally {
-    const next = probeWaiters.shift();
-    if (next) next();
-    else activeProbes--;
-  }
-}
 
 function signal(session) {
   for (const wake of session.waiters) wake();
@@ -68,86 +49,6 @@ async function evictIdle() {
   }
 }
 
-function durationFromOutput(output) {
-  const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(output);
-  if (!match) return null;
-  const duration = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
-  return Number.isFinite(duration) && duration > 0 ? duration : null;
-}
-
-function probeDuration(video) {
-  return withProbeSlot(() => probeDurationNow(video));
-}
-
-async function probeDurationNow(video) {
-  return new Promise((resolve, reject) => {
-    if (!ffprobePath) {
-      reject(new Error("ffprobe-static não forneceu um binário para esta plataforma."));
-      return;
-    }
-
-    const child = spawn(ffprobePath, [
-      "-v", "error",
-      "-rw_timeout", "30000000",
-      "-show_entries", "format=duration:stream=duration",
-      "-of", "json",
-      video.url
-    ], { stdio: ["ignore", "pipe", "pipe"] });
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const finish = (error, duration) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) reject(error);
-      else resolve(duration);
-    };
-
-    const timeout = setTimeout(() => {
-      try { child.kill("SIGTERM"); } catch {}
-      finish(new Error("Tempo esgotado ao consultar a duração do vídeo no Google Fotos com ffprobe."));
-    }, 45_000);
-    timeout.unref?.();
-
-    child.stdout.on("data", chunk => {
-      stdout = (stdout + chunk.toString()).slice(-12000);
-    });
-    child.stderr.on("data", chunk => {
-      stderr = (stderr + chunk.toString()).slice(-12000);
-    });
-    child.once("error", error => finish(error));
-    child.once("close", (code, signal) => {
-      if (settled) return;
-      if (code !== 0) {
-        const exitInfo = "código " + code + (signal ? ", sinal " + signal : "");
-        finish(new Error("ffprobe não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (" + exitInfo + ")."));
-        return;
-      }
-
-      try {
-        const metadata = JSON.parse(stdout);
-        const formatDuration = Number(metadata?.format?.duration);
-        const streamDuration = Array.isArray(metadata?.streams)
-          ? metadata.streams.map(stream => Number(stream?.duration)).find(value => Number.isFinite(value) && value > 0)
-          : null;
-        const duration = Number.isFinite(formatDuration) && formatDuration > 0
-          ? formatDuration
-          : streamDuration;
-
-        if (!Number.isFinite(duration) || duration <= 0) {
-          finish(new Error("ffprobe terminou sem fornecer uma duração válida: " + (stdout || stderr || "sem detalhes")));
-          return;
-        }
-        finish(null, duration);
-      } catch (error) {
-        finish(new Error("Não foi possível interpretar os metadados de duração do ffprobe: " + error.message));
-      }
-    });
-  });
-}
-
 async function createSession(video) {
   await evictIdle();
   await fs.mkdir(ROOT, { recursive: true });
@@ -155,7 +56,9 @@ async function createSession(video) {
   await fs.rm(dir, { recursive: true, force: true });
   await fs.mkdir(dir, { recursive: true });
 
-  const duration = await probeDuration(video);
+  // Duração temporária fixa: os quatro vídeos atuais têm 24min30s.
+  // Não executar ffprobe: o binário está causando SIGSEGV no servidor.
+  const duration = 24 * 60 + 30;
   const totalSegments = Math.ceil(duration / SEGMENT_SECONDS);
   if (!Number.isSafeInteger(totalSegments) || totalSegments < 1 || totalSegments > 99999) {
     throw new Error("Duração do vídeo fora do limite suportado pelo HLS.");
