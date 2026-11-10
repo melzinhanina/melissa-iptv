@@ -1,0 +1,13 @@
+{
+  "name": "melissa-iptv-tunnel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "client": "node client.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
