@@ -116,6 +116,7 @@ async function createSession(video) {
     duration,
     totalSegments,
     segmentTasks: new Map(),
+    cachedSegments: new Set(),
     children: new Set(),
     activeRequests: 0,
     lastUsed: Date.now(),
@@ -212,6 +213,7 @@ async function generateSegment(session, index) {
         const stat = await fs.stat(temporaryPath);
         if (!stat.size) throw new Error("FFmpeg gerou um segmento vazio: " + index);
         await fs.rename(temporaryPath, outputPath);
+        session.cachedSegments.add(index);
         resolve();
       } catch (error) {
         await fs.rm(temporaryPath, { force: true }).catch(() => {});
@@ -347,7 +349,7 @@ export function hlsStats() {
     segmentSeconds: SEGMENT_SECONDS,
     playlistMode: "vod",
     seekMode: "on-demand-http-input-seek",
-    cachedSegments: [...sessions.values()].reduce((count, session) => count + session.segmentTasks.size, 0)
+    cachedSegments: [...sessions.values()].reduce((count, session) => count + session.cachedSegments.size, 0)
   };
 }
 
