@@ -2,13 +2,7 @@ import http from "node:http";
 import { PassThrough } from "node:stream";
 
 const PORT = Number(process.env.PORT || 18080);
-const TUNNEL_TOKEN = process.env.TUNNEL_TOKEN || "";
 const transfers = new Map();
-
-if (!TUNNEL_TOKEN) {
-  console.error("TUNNEL_TOKEN não configurado.");
-  process.exit(1);
-}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
@@ -29,12 +23,18 @@ const server = http.createServer((req, res) => {
 
   const [, action, id] = match;
 
-  if (action === "enviar") {
+  if (action === "enviar" && req.method === "POST") {
     receiveData(req, res, id);
     return;
   }
 
-  sendData(req, res, id);
+  if (action === "receber" && req.method === "GET") {
+    sendData(res, id);
+    return;
+  }
+
+  res.writeHead(405, { allow: action === "enviar" ? "POST" : "GET" });
+  res.end("Method not allowed");
 });
 
 function getTransfer(id) {
@@ -44,15 +44,12 @@ function getTransfer(id) {
     transfer = {
       stream: new PassThrough(),
       sender: null,
-      senderResponse: null,
       receiver: null,
       contentType: "application/octet-stream",
       started: false
     };
 
     transfers.set(id, transfer);
-
-    transfer.stream.on("end", () => removeTransfer(id, transfer));
     transfer.stream.on("close", () => removeTransfer(id, transfer));
   }
 
@@ -60,12 +57,6 @@ function getTransfer(id) {
 }
 
 function receiveData(req, res, id) {
-  if (req.headers.authorization !== `Bearer ${TUNNEL_TOKEN}`) {
-    res.writeHead(401);
-    res.end("Unauthorized");
-    return;
-  }
-
   const transfer = getTransfer(id);
 
   if (transfer.sender) {
@@ -75,11 +66,10 @@ function receiveData(req, res, id) {
   }
 
   transfer.sender = req;
-  transfer.senderResponse = res;
   transfer.contentType = req.headers["content-type"] || "application/octet-stream";
 
   req.on("aborted", () => {
-    transfer.stream.destroy(new Error("Sender disconnected"));
+    transfer.stream.destroy();
     if (transfer.receiver && !transfer.receiver.writableEnded) {
       transfer.receiver.destroy();
     }
@@ -96,7 +86,6 @@ function receiveData(req, res, id) {
 
   req.on("end", () => {
     transfer.stream.end();
-
     if (!res.headersSent) {
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
       res.end("ok");
@@ -107,7 +96,7 @@ function receiveData(req, res, id) {
   startTransfer(transfer);
 }
 
-function sendData(req, res, id) {
+function sendData(res, id) {
   const transfer = getTransfer(id);
 
   if (transfer.receiver) {
@@ -120,16 +109,10 @@ function sendData(req, res, id) {
 
   res.on("close", () => {
     if (!res.writableEnded) {
-      transfer.stream.destroy(new Error("Receiver disconnected"));
-
+      transfer.stream.destroy();
       if (transfer.sender && !transfer.sender.destroyed) {
         transfer.sender.destroy();
       }
-
-      if (transfer.senderResponse && !transfer.senderResponse.writableEnded) {
-        transfer.senderResponse.destroy();
-      }
-
       removeTransfer(id, transfer);
     }
   });
@@ -141,7 +124,6 @@ function startTransfer(transfer) {
   if (transfer.started || !transfer.sender || !transfer.receiver) return;
 
   transfer.started = true;
-
   transfer.receiver.writeHead(200, {
     "content-type": transfer.contentType,
     "cache-control": "no-store",
