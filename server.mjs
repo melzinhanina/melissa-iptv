@@ -99,7 +99,7 @@ function receiveData(req, res, id) {
 
     if (!res.headersSent) {
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      res.end(" enviado");
+      res.end("ok");
     }
   });
 
