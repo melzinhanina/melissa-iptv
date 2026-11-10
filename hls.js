@@ -11,6 +11,22 @@ const SEGMENT_SECONDS = Math.max(2, Math.min(15, Number(process.env.HLS_SEGMENT_
 const SESSION_TTL = Math.max(60_000, Number(process.env.HLS_SESSION_TTL_MS) || 10 * 60 * 1000);
 const sessions = new Map();
 const creating = new Map();
+const MAX_CONCURRENT_PROBES = 2;
+let activeProbes = 0;
+const probeWaiters = [];
+
+async function withProbeSlot(task) {
+  if (activeProbes >= MAX_CONCURRENT_PROBES) {
+    await new Promise(resolve => probeWaiters.push(resolve));
+  }
+  activeProbes++;
+  try {
+    return await task();
+  } finally {
+    activeProbes--;
+    probeWaiters.shift()?.();
+  }
+}
 
 function signal(session) {
   for (const wake of session.waiters) wake();
@@ -56,10 +72,16 @@ function durationFromOutput(output) {
   return Number.isFinite(duration) && duration > 0 ? duration : null;
 }
 
-async function probeDuration(video) {
+function probeDuration(video) {
+  return withProbeSlot(() => probeDurationNow(video));
+}
+
+async function probeDurationNow(video) {
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpegExecutable, [
-      "-hide_banner", "-i", video.url, "-t", "0", "-f", "null", "-"
+      "-hide_banner", "-nostdin", "-loglevel", "info",
+      "-rw_timeout", "30000000",
+      "-i", video.url, "-t", "0", "-f", "null", "-"
     ], { stdio: ["ignore", "ignore", "pipe"] });
 
     let stderr = "";
@@ -87,11 +109,14 @@ async function probeDuration(video) {
       }
     });
     child.once("error", error => finish(error));
-    child.once("close", code => {
+    child.once("close", (code, signal) => {
       if (settled) return;
       const duration = durationFromOutput(stderr);
       if (duration) finish(null, duration);
-      else finish(new Error("FFmpeg não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (código " + code + ")."));
+      else {
+        const exitInfo = "código " + code + (signal ? ", sinal " + signal : "");
+        finish(new Error("FFmpeg não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (" + exitInfo + ")."));
+      }
     });
   });
 }
@@ -133,6 +158,10 @@ async function getSession(video) {
   if (session && session.closed) {
     sessions.delete(video.id);
     session = null;
+  }
+  if (session) {
+    // O extrator renova as URLs do Google Fotos; não manter uma URL antiga na sessão.
+    session.video = video;
   }
   if (!session) {
     let pending = creating.get(video.id);
