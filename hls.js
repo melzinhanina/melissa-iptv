@@ -16,6 +16,7 @@ function signal(session) {
   for (const wake of session.waiters) wake();
   session.waiters.clear();
 }
+
 function waitChange(session, ms = 250) {
   return new Promise(resolve => {
     let timer;
@@ -28,73 +29,73 @@ function waitChange(session, ms = 250) {
     timer = setTimeout(done, ms);
   });
 }
-async function countSegments(dir) {
-  const files = await fs.readdir(dir).catch(() => []);
-  const indexes = files
-    .map(name => /^segment_(\d{5})\.ts$/.exec(name))
-    .filter(Boolean)
-    .map(match => Number(match[1]));
-  return indexes.length ? Math.max(...indexes) + 1 : 0;
-}
+
 async function cleanupSession(session) {
   session.closed = true;
   signal(session);
-  try { await session.reader?.cancel(); } catch {}
-  try { session.controller?.abort(); } catch {}
-  try { session.ffmpeg?.stdin?.destroy(); } catch {}
-  try { session.ffmpeg?.kill("SIGTERM"); } catch {}
+  for (const child of session.children) {
+    try { child.kill("SIGTERM"); } catch {}
+  }
   await fs.rm(session.dir, { recursive: true, force: true }).catch(() => {});
 }
+
 async function evictIdle() {
   const now = Date.now();
-  for (const [id, s] of sessions) {
-    if (now - s.lastUsed > SESSION_TTL && !s.activeRequests) {
+  for (const [id, session] of sessions) {
+    if (now - session.lastUsed > SESSION_TTL && !session.activeRequests && !session.segmentTasks.size) {
       sessions.delete(id);
-      void cleanupSession(s);
+      void cleanupSession(session);
     }
   }
-
 }
-function writeChunk(stream, chunk) {
+
+function durationFromOutput(output) {
+  const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(output);
+  if (!match) return null;
+  const duration = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  return Number.isFinite(duration) && duration > 0 ? duration : null;
+}
+
+async function probeDuration(video) {
   return new Promise((resolve, reject) => {
-    if (stream.destroyed || !stream.writable) return reject(new Error("FFmpeg stdin foi encerrado."));
-    if (stream.write(chunk)) return resolve();
-    stream.once("drain", resolve);
-    stream.once("error", reject);
+    const child = spawn(ffmpegExecutable, [
+      "-hide_banner", "-i", video.url, "-t", "0", "-f", "null", "-"
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderr = "";
+    let settled = false;
+    const finish = (error, duration) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error);
+      else resolve(duration);
+    };
+
+    const timeout = setTimeout(() => {
+      try { child.kill("SIGTERM"); } catch {}
+      finish(new Error("Tempo esgotado ao consultar a duração do vídeo no Google Fotos."));
+    }, 45_000);
+    timeout.unref?.();
+
+    child.stderr.on("data", chunk => {
+      stderr = (stderr + chunk.toString()).slice(-12000);
+      const duration = durationFromOutput(stderr);
+      if (duration) {
+        try { child.kill("SIGTERM"); } catch {}
+        finish(null, duration);
+      }
+    });
+    child.once("error", error => finish(error));
+    child.once("close", code => {
+      if (settled) return;
+      const duration = durationFromOutput(stderr);
+      if (duration) finish(null, duration);
+      else finish(new Error("FFmpeg não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (código " + code + ")."));
+    });
   });
 }
-export async function pump(session) {
-  if (session.pumping || session.closed) return;
-  session.pumping = true;
-  try {
-    while (!session.closed && !session.eof && !session.error) {
-      const item = await session.reader.read();
-      if (item.done) {
-        session.eof = true;
-        session.ffmpeg.stdin.end();
-        signal(session);
-        break;
-      }
-      const data = Buffer.from(item.value);
-      // Fragmentar a entrada evita despejar um bloco grande no pipe do FFmpeg de uma vez.
-      for (let offset = 0; offset < data.length && !session.closed && !session.error; offset += 64 * 1024) {
-        const part = data.subarray(offset, Math.min(offset + 64 * 1024, data.length));
-        await writeChunk(session.ffmpeg.stdin, part);
-        await new Promise(resolve => setTimeout(resolve, 35));
-      }
-      signal(session);
-    }
-  } catch (error) {
-    if (!session.closed) {
-      session.error = error;
-      console.error("HLS upstream/FFmpeg:", session.id, error.message);
-      signal(session);
-    }
-  } finally {
-    session.pumping = false;
-    signal(session);
-  }
-}
+
 async function createSession(video) {
   await evictIdle();
   await fs.mkdir(ROOT, { recursive: true });
@@ -102,59 +103,29 @@ async function createSession(video) {
   await fs.rm(dir, { recursive: true, force: true });
   await fs.mkdir(dir, { recursive: true });
 
-  const controller = new AbortController();
-  const response = await fetch(video.url, {
-    headers: { Accept: "*/*", "Accept-Encoding": "identity", "User-Agent": "Mozilla/5.0 MelissaIPTV/4.0" },
-    redirect: "follow",
-    signal: controller.signal
-  });
-  if (response.status !== 200 || !response.body) {
-    controller.abort();
-    throw new Error(`Google Fotos respondeu HTTP ${response.status}; esperado HTTP 200 com corpo.`);
+  const duration = await probeDuration(video);
+  const totalSegments = Math.ceil(duration / SEGMENT_SECONDS);
+  if (!Number.isSafeInteger(totalSegments) || totalSegments < 1 || totalSegments > 99999) {
+    throw new Error("Duração do vídeo fora do limite suportado pelo HLS.");
   }
 
-  const playlistPath = path.join(dir, "index.m3u8");
-  const segmentPattern = path.join(dir, "segment_%05d.ts");
-  const args = [
-    "-hide_banner", "-loglevel", "warning",
-    "-i", "pipe:0",
-    "-map", "0:v:0?", "-map", "0:a:0?",
-    "-c", "copy",
-    "-f", "hls",
-    "-hls_time", String(SEGMENT_SECONDS),
-    "-hls_list_size", "0",
-    "-hls_playlist_type", "vod",
-    "-hls_flags", "append_list+independent_segments+temp_file",
-    "-hls_segment_filename", segmentPattern,
-    playlistPath
-  ];
-  const ffmpeg = spawn(ffmpegExecutable || ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
-  let stderr = "";
-  ffmpeg.stderr.on("data", chunk => {
-    stderr = (stderr + chunk.toString()).slice(-6000);
-  });
-
   const session = {
-    id: video.id, dir, playlistPath, controller, reader: response.body.getReader(),
-    ffmpeg, stderr, requestedThrough: -1, produced: 0, pumping: false,
-    eof: false, ffmpegDone: false, error: null, closed: false, waiters: new Set(),
-    activeRequests: 0, lastUsed: Date.now()
+    id: video.id,
+    video,
+    dir,
+    duration,
+    totalSegments,
+    segmentTasks: new Map(),
+    children: new Set(),
+    activeRequests: 0,
+    lastUsed: Date.now(),
+    closed: false,
+    waiters: new Set()
   };
-  ffmpeg.once("error", error => {
-    session.error = error;
-    signal(session);
-  });
-  ffmpeg.once("close", code => {
-    session.ffmpegDone = true;
-    if (code && !session.eof && !session.closed) {
-      session.error = new Error(`FFmpeg encerrou com código ${code}: ${stderr}`);
-    }
-    signal(session);
-  });
   sessions.set(video.id, session);
-  void pump(session);
   return session;
 }
+
 async function getSession(video) {
   await evictIdle();
   let session = sessions.get(video.id);
@@ -169,131 +140,224 @@ async function getSession(video) {
       creating.set(video.id, pending);
     }
     try { session = await pending; }
-    finally { if (creating.get(video.id) === pending) creating.delete(video.id); }
+    finally {
+      if (creating.get(video.id) === pending) creating.delete(video.id);
+    }
   }
   session.lastUsed = Date.now();
   return session;
 }
-async function waitPlaylist(session) {
-  const deadline = Date.now() + 45_000;
-  while (Date.now() < deadline) {
-    if (session.error) throw session.error;
-    const count = await countSegments(session.dir);
-    if (count > 0) {
-      try {
-        const content = await fs.readFile(session.playlistPath, "utf8");
-        if (content.includes(".ts")) return content;
-      } catch {}
-    }
-    if (session.ffmpegDone) break;
-    await waitChange(session, 200);
-  }
-  throw new Error("FFmpeg ainda não produziu o primeiro segmento HLS.");
+
+function segmentName(index) {
+  return "segment_" + String(index).padStart(5, "0") + ".ts";
 }
+
+async function generateSegment(session, index) {
+  if (session.closed) throw new Error("Sessão HLS encerrada.");
+  const start = index * SEGMENT_SECONDS;
+  const duration = Math.min(SEGMENT_SECONDS, session.duration - start);
+  const outputPath = path.join(session.dir, segmentName(index));
+  const temporaryPath = outputPath + ".tmp";
+
+  const args = [
+    "-hide_banner", "-loglevel", "warning",
+    "-ss", start.toFixed(3),
+    "-i", session.video.url,
+    "-t", duration.toFixed(3),
+    "-map", "0:v:0?", "-map", "0:a:0?",
+    "-c", "copy",
+    "-avoid_negative_ts", "make_zero",
+    "-f", "mpegts",
+    "pipe:1"
+  ];
+
+  await fs.rm(temporaryPath, { force: true });
+  await new Promise((resolve, reject) => {
+    const child = spawn(ffmpegExecutable, args, { stdio: ["ignore", "pipe", "pipe"] });
+    session.children.add(child);
+    let stderr = "";
+    let settled = false;
+    const output = (async () => {
+      const file = await fs.open(temporaryPath, "w");
+      try {
+        for await (const chunk of child.stdout) await file.write(chunk);
+      } finally {
+        await file.close();
+      }
+    })();
+
+    const timeout = setTimeout(() => {
+      try { child.kill("SIGTERM"); } catch {}
+    }, 120_000);
+    timeout.unref?.();
+
+    child.stderr.on("data", chunk => {
+      stderr = (stderr + chunk.toString()).slice(-6000);
+    });
+    child.once("error", error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      session.children.delete(child);
+      reject(error);
+    });
+    child.once("close", async code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      session.children.delete(child);
+      try {
+        await output;
+        if (code !== 0) throw new Error("FFmpeg falhou ao gerar o segmento " + index + ": " + stderr);
+        const stat = await fs.stat(temporaryPath);
+        if (!stat.size) throw new Error("FFmpeg gerou um segmento vazio: " + index);
+        await fs.rename(temporaryPath, outputPath);
+        resolve();
+      } catch (error) {
+        await fs.rm(temporaryPath, { force: true }).catch(() => {});
+        reject(error);
+      }
+    });
+  });
+}
+
+async function ensureSegment(session, index) {
+  const file = path.join(session.dir, segmentName(index));
+  try {
+    const stat = await fs.stat(file);
+    if (stat.isFile() && stat.size > 0) return file;
+  } catch {}
+
+  let task = session.segmentTasks.get(index);
+  if (!task) {
+    task = generateSegment(session, index).finally(() => {
+      if (session.segmentTasks.get(index) === task) session.segmentTasks.delete(index);
+      session.lastUsed = Date.now();
+      signal(session);
+    });
+    session.segmentTasks.set(index, task);
+  }
+  await task;
+  return file;
+}
+
 export async function getHlsPlaylist(video) {
   const session = await getSession(video);
   session.activeRequests++;
   try {
-    const content = await waitPlaylist(session);
+    const lines = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-PLAYLIST-TYPE:VOD",
+      "#EXT-X-TARGETDURATION:" + Math.ceil(SEGMENT_SECONDS),
+      "#EXT-X-MEDIA-SEQUENCE:0"
+    ];
+    for (let index = 0; index < session.totalSegments; index++) {
+      const segmentDuration = Math.min(SEGMENT_SECONDS, session.duration - index * SEGMENT_SECONDS);
+      lines.push("#EXTINF:" + segmentDuration.toFixed(3) + ",");
+      lines.push(segmentName(index));
+    }
+    lines.push("#EXT-X-ENDLIST");
     session.lastUsed = Date.now();
-    return content;
+    return lines.join("\n") + "\n";
   } finally {
     session.activeRequests--;
   }
 }
+
 export async function serveHlsSegment(req, res, video, filename) {
   if (!/^segment_\d{5}\.ts$/.test(filename)) {
-    res.writeHead(400); return res.end("Nome de segmento inválido.");
+    res.writeHead(400);
+    return res.end("Nome de segmento inválido.");
   }
+
   const session = await getSession(video);
   const index = Number(filename.match(/segment_(\d{5})/)[1]);
-  session.requestedThrough = Math.max(session.requestedThrough, index);
+  if (index >= session.totalSegments) {
+    res.writeHead(404, { "Cache-Control": "no-store" });
+    return res.end("Segmento fora da duração do vídeo.");
+  }
+
   session.activeRequests++;
   session.lastUsed = Date.now();
-  signal(session);
-  void pump(session);
-  const file = path.join(session.dir, filename);
   try {
-    while (!session.closed) {
-      if (session.error) throw session.error;
-      try {
-        const stat = await fs.stat(file);
-        if (stat.isFile() && stat.size > 0) {
-          let start = 0;
-          let end = stat.size - 1;
-          let status = 200;
-          const rangeHeader = req.headers.range;
-          if (rangeHeader) {
-            const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
-            if (!match || (!match[1] && !match[2])) {
-              res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
-              return res.end();
-            }
-            if (!match[1]) {
-              const suffix = Number(match[2]);
-              if (!Number.isSafeInteger(suffix) || suffix <= 0) {
-                res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
-                return res.end();
-              }
-              start = Math.max(0, stat.size - suffix);
-            } else {
-              start = Number(match[1]);
-              end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
-            }
-            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= stat.size) {
-              res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes" });
-              return res.end();
-            }
-            status = 206;
-          }
-          const headers = {
-            "Content-Type": "video/mp2t",
-            "Content-Length": end - start + 1,
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=60",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range"
-          };
-          if (status === 206) headers["Content-Range"] = `bytes ${start}-${end}/${stat.size}`;
-          res.writeHead(status, headers);
-          if (req.method === "HEAD") return res.end();
-          const stream = (await import("node:fs")).createReadStream(file, { start, end });
-          stream.on("error", error => res.destroy(error));
-          stream.pipe(res);
-          return;
+    const file = await ensureSegment(session, index);
+    const stat = await fs.stat(file);
+    let start = 0;
+    let end = stat.size - 1;
+    let status = 200;
+    const rangeHeader = req.headers.range;
+
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+      if (!match || (!match[1] && !match[2])) {
+        res.writeHead(416, { "Content-Range": "bytes */" + stat.size, "Accept-Ranges": "bytes" });
+        return res.end();
+      }
+      if (!match[1]) {
+        const suffix = Number(match[2]);
+        if (!Number.isSafeInteger(suffix) || suffix <= 0) {
+          res.writeHead(416, { "Content-Range": "bytes */" + stat.size, "Accept-Ranges": "bytes" });
+          return res.end();
         }
-      } catch {}
-      if (session.eof) break;
-      await waitChange(session, 200);
+        start = Math.max(0, stat.size - suffix);
+      } else {
+        start = Number(match[1]);
+        end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= stat.size) {
+        res.writeHead(416, { "Content-Range": "bytes */" + stat.size, "Accept-Ranges": "bytes" });
+        return res.end();
+      }
+      status = 206;
     }
+
+    const headers = {
+      "Content-Type": "video/mp2t",
+      "Content-Length": end - start + 1,
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "public, max-age=60",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range"
+    };
+    if (status === 206) headers["Content-Range"] = "bytes " + start + "-" + end + "/" + stat.size;
+    res.writeHead(status, headers);
+    if (req.method === "HEAD") return res.end();
+
+    const stream = (await import("node:fs")).createReadStream(file, { start, end });
+    stream.on("error", error => res.destroy(error));
+    stream.pipe(res);
+  } catch (error) {
     if (!res.headersSent) {
-      res.writeHead(404, { "Cache-Control": "no-store" });
-      res.end("Segmento ainda não disponível ou já expirou da janela HLS.");
+      res.writeHead(502, { "Cache-Control": "no-store" });
+      res.end("Não foi possível gerar o trecho solicitado: " + error.message);
+    } else {
+      res.destroy(error);
     }
   } finally {
     session.activeRequests--;
     session.lastUsed = Date.now();
   }
 }
+
 export function hlsStats() {
   return {
     sessions: sessions.size,
-    activeRequests: [...sessions.values()].reduce((n, s) => n + s.activeRequests, 0),
+    activeRequests: [...sessions.values()].reduce((count, session) => count + session.activeRequests, 0),
     segmentSeconds: SEGMENT_SECONDS,
     playlistMode: "vod",
-    segmentRetention: "all"
+    seekMode: "on-demand-http-input-seek",
+    cachedSegments: [...sessions.values()].reduce((count, session) => count + session.segmentTasks.size, 0)
   };
 }
+
 export async function checkFfmpeg() {
   if (!ffmpegPath) throw new Error("ffmpeg-static não forneceu um binário para esta plataforma.");
 
-  // O diretório da aplicação no Hostless pode ser somente leitura e/ou noexec.
-  // Copiamos o binário empacotado para /tmp, que é o diretório gravável do runtime.
   await fs.mkdir(path.dirname(RUNTIME_FFMPEG_PATH), { recursive: true });
   await fs.copyFile(ffmpegPath, RUNTIME_FFMPEG_PATH);
   await fs.chmod(RUNTIME_FFMPEG_PATH, 0o755);
 
-  // Não basta verificar se o arquivo existe: executá-lo confirma que não há EACCES.
   await new Promise((resolve, reject) => {
     const child = spawn(RUNTIME_FFMPEG_PATH, ["-version"], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -301,13 +365,14 @@ export async function checkFfmpeg() {
     child.once("error", reject);
     child.once("close", code => {
       if (code === 0) resolve();
-      else reject(new Error(`Não foi possível executar o FFmpeg copiado para /tmp (código ${code}): ${stderr}`));
+      else reject(new Error("Não foi possível executar o FFmpeg copiado para /tmp (código " + code + "): " + stderr));
     });
   });
 
   ffmpegExecutable = RUNTIME_FFMPEG_PATH;
   return ffmpegExecutable;
 }
+
 export async function closeHls() {
   const all = [...sessions.values()];
   sessions.clear();
