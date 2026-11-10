@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
+import ffprobePath from "@derhuerst/ffprobe-static";
 import { HLS_DIR } from "./storage-paths.js";
 
 const ROOT = HLS_DIR;
@@ -80,12 +81,20 @@ function probeDuration(video) {
 
 async function probeDurationNow(video) {
   return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegExecutable, [
-      "-hide_banner", "-nostdin", "-loglevel", "info",
-      "-rw_timeout", "30000000",
-      "-i", video.url, "-t", "0", "-f", "null", "-"
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    if (!ffprobePath) {
+      reject(new Error("ffprobe-static não forneceu um binário para esta plataforma."));
+      return;
+    }
 
+    const child = spawn(ffprobePath, [
+      "-v", "error",
+      "-rw_timeout", "30000000",
+      "-show_entries", "format=duration:stream=duration",
+      "-of", "json",
+      video.url
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+
+    let stdout = "";
     let stderr = "";
     let settled = false;
     const finish = (error, duration) => {
@@ -98,26 +107,42 @@ async function probeDurationNow(video) {
 
     const timeout = setTimeout(() => {
       try { child.kill("SIGTERM"); } catch {}
-      finish(new Error("Tempo esgotado ao consultar a duração do vídeo no Google Fotos."));
+      finish(new Error("Tempo esgotado ao consultar a duração do vídeo no Google Fotos com ffprobe."));
     }, 45_000);
     timeout.unref?.();
 
+    child.stdout.on("data", chunk => {
+      stdout = (stdout + chunk.toString()).slice(-12000);
+    });
     child.stderr.on("data", chunk => {
       stderr = (stderr + chunk.toString()).slice(-12000);
-      const duration = durationFromOutput(stderr);
-      if (duration) {
-        try { child.kill("SIGTERM"); } catch {}
-        finish(null, duration);
-      }
     });
     child.once("error", error => finish(error));
     child.once("close", (code, signal) => {
       if (settled) return;
-      const duration = durationFromOutput(stderr);
-      if (duration) finish(null, duration);
-      else {
+      if (code !== 0) {
         const exitInfo = "código " + code + (signal ? ", sinal " + signal : "");
-        finish(new Error("FFmpeg não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (" + exitInfo + ")."));
+        finish(new Error("ffprobe não conseguiu identificar a duração do vídeo: " + (stderr || "sem detalhes") + " (" + exitInfo + ")."));
+        return;
+      }
+
+      try {
+        const metadata = JSON.parse(stdout);
+        const formatDuration = Number(metadata?.format?.duration);
+        const streamDuration = Array.isArray(metadata?.streams)
+          ? metadata.streams.map(stream => Number(stream?.duration)).find(value => Number.isFinite(value) && value > 0)
+          : null;
+        const duration = Number.isFinite(formatDuration) && formatDuration > 0
+          ? formatDuration
+          : streamDuration;
+
+        if (!Number.isFinite(duration) || duration <= 0) {
+          finish(new Error("ffprobe terminou sem fornecer uma duração válida: " + (stdout || stderr || "sem detalhes")));
+          return;
+        }
+        finish(null, duration);
+      } catch (error) {
+        finish(new Error("Não foi possível interpretar os metadados de duração do ffprobe: " + error.message));
       }
     });
   });
