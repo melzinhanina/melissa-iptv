@@ -85,12 +85,12 @@ function createM3u() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "Método não permitido." });
-  if (url.pathname === "/health") return sendJson(res, 200, { status: "ok", videos: catalog.length, engine: "Google Photos HTTP 200 -> paced FFmpeg HLS", ...hlsStats() });
+  if (url.pathname === "/health") return sendJson(res, 200, { status: "ok", videos: catalog.length, engine: "Google Photos HTTP input -> on-demand seekable FFmpeg HLS", ...hlsStats() });
   if (!authorized(req, res)) return;
   if (url.pathname === "/" || url.pathname === "/api") {
     return sendJson(res, 200, {
       name: "Melissa IPTV", url: PUBLIC_URL, playlist: `${PUBLIC_URL}/playlist.m3u8${tokenQuery()}`,
-      videos: catalog.length, engine: "Progressive HLS with per-video rolling cache",
+      videos: catalog.length, engine: "VOD HLS with on-demand random-access segments",
       endpoints: ["/health", "/playlist.m3u", "/playlist.m3u8", "/api/videos", "/hls/:id/index.m3u8", "/hls/:id/segment_00000.ts"]
     });
   }
@@ -147,7 +147,7 @@ Promise.all([loadCatalog(), checkFfmpeg()]).then(([_, ffmpeg]) => {
     console.log(`Playlist IPTV: ${PUBLIC_URL}/playlist.m3u8`);
     console.log(`Vídeos carregados: ${catalog.length}`);
     console.log(`FFmpeg: ${ffmpeg}`);
-    console.log("Entrada Google Fotos HTTP 200; FFmpeg gera HLS progressivamente; player recebe segmentos HTTP 200.");
+    console.log("Entrada direta do Google Fotos; FFmpeg gera sob demanda os segmentos HLS solicitados pelo player.");
   });
 }).catch(error => {
   console.error("Falha na inicialização:", error);
