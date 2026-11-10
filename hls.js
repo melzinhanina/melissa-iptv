@@ -18,13 +18,15 @@ const probeWaiters = [];
 async function withProbeSlot(task) {
   if (activeProbes >= MAX_CONCURRENT_PROBES) {
     await new Promise(resolve => probeWaiters.push(resolve));
+  } else {
+    activeProbes++;
   }
-  activeProbes++;
   try {
     return await task();
   } finally {
-    activeProbes--;
-    probeWaiters.shift()?.();
+    const next = probeWaiters.shift();
+    if (next) next();
+    else activeProbes--;
   }
 }
 
