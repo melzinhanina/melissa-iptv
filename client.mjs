@@ -1,14 +1,9 @@
 import http from "node:http";
 import https from "node:https";
 
-const SOURCE_URL = process.env.SOURCE_URL;
-const RELAY_URL = process.env.RELAY_URL || "https://melissa-iptv.hostless.app";
-const STREAM_ID = process.env.STREAM_ID || "video1";
-
-if (!SOURCE_URL) {
-  console.error("Configure SOURCE_URL.");
-  process.exit(1);
-}
+const SOURCE_URL = "http://127.0.0.1:8000/video1";
+const RELAY_URL = "https://melissa-iptv.hostless.app";
+const STREAM_ID = "video1";
 
 const sourceUrl = new URL(SOURCE_URL);
 const relayUrl = new URL(`/enviar/${encodeURIComponent(STREAM_ID)}`, RELAY_URL);
