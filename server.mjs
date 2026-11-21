@@ -12,15 +12,10 @@ const segmentCache = createSegmentCache({
 });
 
 
-const AGENT_TOKEN = String(process.env.AGENT_TOKEN || "").trim();
 const pendingProxyRequests = new Map();
 const proxyQueue = [];
 const pollWaiters = [];
 const PROXY_REQUEST_TIMEOUT_MS = Math.max(15_000, Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 90_000));
-
-function agentAuthorized(req) {
-  return Boolean(AGENT_TOKEN) && req.headers.authorization === "Bearer " + AGENT_TOKEN;
-}
 
 function jsonResponse(res, status, value) {
   const body = JSON.stringify(value);
@@ -43,11 +38,6 @@ function dispatchProxyJob(job) {
 }
 
 async function handleAgentPoll(req, res) {
-  if (!agentAuthorized(req)) {
-    res.writeHead(401);
-    res.end("Unauthorized agent");
-    return;
-  }
   let job = proxyQueue.shift() || null;
   if (!job) {
     job = await new Promise((resolve) => {
@@ -91,12 +81,6 @@ function safeResponseHeaders(input) {
 }
 
 function handleAgentResponse(req, res, requestId) {
-  if (!agentAuthorized(req)) {
-    req.resume();
-    res.writeHead(401);
-    res.end("Unauthorized agent");
-    return;
-  }
   const pending = pendingProxyRequests.get(requestId);
   if (!pending || pending.res.destroyed || pending.res.writableEnded) {
     req.resume();
@@ -148,11 +132,6 @@ function proxyToTermux(req, res, url) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.writeHead(405, { allow: "GET, HEAD" });
     res.end("Method not allowed");
-    return;
-  }
-  if (!AGENT_TOKEN) {
-    res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
-    res.end("Reverse tunnel is not configured: set AGENT_TOKEN on Hostless.");
     return;
   }
   const requestId = randomUUID();
@@ -488,5 +467,6 @@ function removeTransfer(id, transfer) {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Relay + cache IPTV ouvindo na porta ${PORT}`);\n  console.log(`Tunnel reverso: ${AGENT_TOKEN ? "AGENT_TOKEN configurado" : "AGENT_TOKEN ausente"}`);
+  console.log(`Relay + cache IPTV ouvindo na porta ${PORT}`);
+  console.log("Tunnel reverso: aguardando agente Termux (sem senha).");
 });
