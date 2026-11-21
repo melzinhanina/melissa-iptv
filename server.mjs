@@ -1,5 +1,5 @@
 import http from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { createSegmentCache } from "./cache/segment-cache.mjs";
 
@@ -11,8 +11,188 @@ const segmentCache = createSegmentCache({
   defaultTtlMs: Number(process.env.CACHE_TTL_MS || 10 * 60 * 1000)
 });
 
+
+const AGENT_TOKEN = String(process.env.AGENT_TOKEN || "").trim();
+const pendingProxyRequests = new Map();
+const proxyQueue = [];
+const pollWaiters = [];
+const PROXY_REQUEST_TIMEOUT_MS = Math.max(15_000, Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 90_000));
+
+function agentAuthorized(req) {
+  return Boolean(AGENT_TOKEN) && req.headers.authorization === "Bearer " + AGENT_TOKEN;
+}
+
+function jsonResponse(res, status, value) {
+  const body = JSON.stringify(value);
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store"
+  });
+  res.end(body);
+}
+
+function dispatchProxyJob(job) {
+  const waiter = pollWaiters.shift();
+  if (waiter) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(job);
+  } else {
+    proxyQueue.push(job);
+  }
+}
+
+async function handleAgentPoll(req, res) {
+  if (!agentAuthorized(req)) {
+    res.writeHead(401);
+    res.end("Unauthorized agent");
+    return;
+  }
+  let job = proxyQueue.shift() || null;
+  if (!job) {
+    job = await new Promise((resolve) => {
+      const waiter = {
+        resolve,
+        timer: setTimeout(() => {
+          const index = pollWaiters.indexOf(waiter);
+          if (index !== -1) pollWaiters.splice(index, 1);
+          resolve(null);
+        }, 25_000)
+      };
+      pollWaiters.push(waiter);
+      res.once("close", () => {
+        clearTimeout(waiter.timer);
+        const index = pollWaiters.indexOf(waiter);
+        if (index !== -1) pollWaiters.splice(index, 1);
+      });
+    });
+  }
+  if (res.destroyed || res.writableEnded) return;
+  if (!job) {
+    res.writeHead(204, { "cache-control": "no-store" });
+    res.end();
+    return;
+  }
+  jsonResponse(res, 200, job);
+}
+
+function safeResponseHeaders(input) {
+  const allowed = new Set([
+    "content-type", "content-range", "accept-ranges", "cache-control",
+    "etag", "last-modified", "content-disposition", "expires", "vary"
+  ]);
+  const output = {};
+  for (const [name, value] of Object.entries(input || {})) {
+    const key = String(name).toLowerCase();
+    if (allowed.has(key) && typeof value === "string") output[key] = value;
+  }
+  return output;
+}
+
+function handleAgentResponse(req, res, requestId) {
+  if (!agentAuthorized(req)) {
+    req.resume();
+    res.writeHead(401);
+    res.end("Unauthorized agent");
+    return;
+  }
+  const pending = pendingProxyRequests.get(requestId);
+  if (!pending || pending.res.destroyed || pending.res.writableEnded) {
+    req.resume();
+    res.writeHead(410);
+    res.end("Proxy request expired");
+    return;
+  }
+  let headers = {};
+  try {
+    const encoded = String(req.headers["x-upstream-headers"] || "");
+    if (encoded) headers = safeResponseHeaders(JSON.parse(Buffer.from(encoded, "base64").toString("utf8")));
+  } catch {
+    req.resume();
+    res.writeHead(400);
+    res.end("Invalid upstream headers");
+    return;
+  }
+  const status = Number(req.headers["x-upstream-status"] || 200);
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    req.resume();
+    res.writeHead(400);
+    res.end("Invalid upstream status");
+    return;
+  }
+  clearTimeout(pending.timer);
+  pending.res.writeHead(status, headers);
+  req.on("error", (error) => {
+    pendingProxyRequests.delete(requestId);
+    if (!pending.res.destroyed) pending.res.destroy(error);
+  });
+  req.on("end", () => pendingProxyRequests.delete(requestId));
+  req.pipe(pending.res);
+  res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+  res.end("stream accepted");
+}
+
+function proxyToTermux(req, res, url) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, { allow: "GET, HEAD" });
+    res.end("Method not allowed");
+    return;
+  }
+  if (!AGENT_TOKEN) {
+    res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Reverse tunnel is not configured: set AGENT_TOKEN on Hostless.");
+    return;
+  }
+  const requestId = randomUUID();
+  const headers = {};
+  for (const name of ["range", "if-range", "if-none-match", "if-modified-since", "accept", "user-agent"]) {
+    if (req.headers[name]) headers[name] = String(req.headers[name]);
+  }
+  headers["x-forwarded-host"] = String(req.headers.host || "melissa-iptv.hostless.app");
+  headers["x-forwarded-proto"] = "https";
+  headers["x-forwarded-prefix"] = "/iptv";
+  const localPath = url.pathname.slice("/iptv".length) || "/";
+  const job = { id: requestId, method: req.method, path: localPath + url.search, headers };
+  const timer = setTimeout(() => {
+    const pending = pendingProxyRequests.get(requestId);
+    if (!pending) return;
+    pendingProxyRequests.delete(requestId);
+    if (!pending.res.headersSent) {
+      pending.res.writeHead(504, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      pending.res.end("Termux did not answer the tunnel request in time.");
+    } else if (!pending.res.destroyed) pending.res.destroy();
+  }, PROXY_REQUEST_TIMEOUT_MS);
+  pendingProxyRequests.set(requestId, { res, timer });
+  res.once("close", () => {
+    if (res.writableEnded) return;
+    const pending = pendingProxyRequests.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingProxyRequests.delete(requestId);
+    }
+  });
+  dispatchProxyJob(job);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
+
+
+  if (url.pathname === "/agent/poll" && req.method === "GET") {
+    await handleAgentPoll(req, res);
+    return;
+  }
+
+  const responseMatch = url.pathname.match(/^\/agent\/respond\/([0-9a-f-]{36})$/i);
+  if (responseMatch && req.method === "POST") {
+    handleAgentResponse(req, res, responseMatch[1]);
+    return;
+  }
+
+  if (url.pathname === "/iptv" || url.pathname.startsWith("/iptv/")) {
+    proxyToTermux(req, res, url);
+    return;
+  }
 
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
@@ -294,5 +474,5 @@ function removeTransfer(id, transfer) {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Relay + cache IPTV ouvindo na porta ${PORT}`);
+  console.log(`Relay + cache IPTV ouvindo na porta ${PORT}`);\n  console.log(`Tunnel reverso: ${AGENT_TOKEN ? "AGENT_TOKEN configurado" : "AGENT_TOKEN ausente"}`);
 });
