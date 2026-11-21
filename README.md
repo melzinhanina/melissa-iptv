@@ -1,22 +1,94 @@
-# Melissa IPTV Relay
+# Melissa IPTV Relay + Cache
 
-Relay HTTP público de bytes. O Hostless recebe um fluxo em `/enviar/:id` e repassa o mesmo conteúdo para quem estiver conectado em `/receber/:id`.
+Servidor HTTP no Hostless com duas funções independentes:
 
-O relay não interpreta vídeo, HLS, playlists ou segmentos. Nenhuma das rotas exige senha ou token.
+1. **Tunnel:** encaminha um fluxo contínuo do Termux para o player.
+2. **Cache IPTV:** recebe segmentos individuais, mantém os bytes em RAM e os entrega com suporte a HTTP Range.
 
-## Rotas
+## Tunnel (preservado)
 
 - `POST /enviar/:id`: envia um fluxo ao relay.
 - `GET /receber/:id`: recebe o mesmo fluxo.
 - `GET /health`: verifica se o processo está ativo.
 
-Um remetente e um receptor por identificador. O fluxo usa memória temporária e backpressure do Node.js. Quando um lado desconecta antes do fim, o outro lado também é encerrado.
+Um remetente e um receptor simultâneos por identificador. O relay usa memória temporária e backpressure do Node.js. Quando um lado desconecta antes do fim, o outro lado também é encerrado. O tunnel não é armazenado no cache.
 
-## Hostless
+Player do tunnel:
 
-O servidor usa a porta fornecida pela plataforma Hostless (`PORT`). Não precisa de arquivo de configuração.
+```
+https://melissa-iptv.hostless.app/receber/video1
+```
 
-Inicie com:
+## Cache de segmentos IPTV
+
+O cache usa identificadores de stream e segmento na URL. Não grava arquivos no disco.
+
+### Enviar ou atualizar um segmento
+
+```http
+POST /cache/:stream/:segment
+Content-Type: video/mp2t
+X-Cache-TTL: 600
+
+<bytes do segmento>
+```
+
+Exemplo com cURL:
+
+```bash
+curl -X POST \
+  -H "Content-Type: video/mp2t" \
+  --data-binary @segment0001.ts \
+  https://melissa-iptv.hostless.app/cache/canal1/segment0001.ts
+```
+
+O cabeçalho opcional `X-Cache-TTL` define a validade em segundos. O padrão é 600 segundos (10 minutos), com máximo de 3600 segundos (1 hora).
+
+### Buscar um segmento
+
+```
+GET /cache/:stream/:segment
+HEAD /cache/:stream/:segment
+```
+
+A resposta inclui `ETag`, `Accept-Ranges: bytes` e `X-Cache-Status: HIT`. Requisições com `Range: bytes=...` recebem `206 Partial Content`; intervalos inválidos recebem `416 Range Not Satisfiable`.
+
+### Listar segmentos de um stream
+
+```
+GET /cache/:stream
+```
+
+Retorna JSON com os segmentos ainda válidos, tamanho e expiração.
+
+### Remover um segmento
+
+```
+DELETE /cache/:stream/:segment
+```
+
+## Limites de memória
+
+Valores padrão:
+
+- Cache total: 512 MiB.
+- Tamanho máximo por segmento: 16 MiB.
+- Validade padrão: 10 minutos.
+- Validade máxima por segmento: 1 hora.
+- Ao atingir a capacidade, segmentos menos recentemente acessados são removidos (LRU).
+- Segmentos expirados são removidos quando o cache é consultado ou recebe novos dados.
+
+É possível ajustar os limites por variáveis de ambiente:
+
+- `CACHE_MAX_BYTES`
+- `CACHE_MAX_SEGMENT_BYTES`
+- `CACHE_TTL_MS`
+
+O cache é volátil: reiniciar o processo limpa os segmentos. As rotas são públicas, portanto não envie conteúdo privado ou identificadores sensíveis.
+
+## Inicialização no Hostless
+
+A porta usa a variável `PORT` da plataforma:
 
 ```bash
 npm install
@@ -25,32 +97,8 @@ npm start
 
 ## Termux
 
-As configurações do cliente ficam diretamente no início de `client.mjs`:
+O `client.mjs` continua com a função antiga de enviar o fluxo local ao tunnel. O cache é uma API adicional para o servidor IPTV/gerador HLS enviar cada segmento individualmente. O cliente de segmentos deve publicar os segmentos na rota `/cache/:stream/:segment` e o player deve consumir essas mesmas URLs.
 
-- `SOURCE_URL`: endereço da origem local.
-- `RELAY_URL`: endereço público do relay.
-- `STREAM_ID`: identificador do fluxo.
+## Importante
 
-Edite esses valores no próprio arquivo e inicie:
-
-```bash
-npm run client
-```
-
-O cliente lê a resposta da origem local e transmite os bytes ao Hostless sem interpretar o conteúdo.
-
-## Player
-
-```
-https://melissa-iptv.hostless.app/receber/video1
-```
-
-O identificador precisa ser igual ao `STREAM_ID` usado pelo Termux.
-
-## Limitações
-
-- As rotas são públicas, inclusive o envio.
-- Um remetente e um receptor simultâneos por identificador.
-- O fluxo não fica armazenado permanentemente.
-- O receptor precisa permanecer conectado durante a transmissão.
-- Não implementa cache, Range ou retomada de transferência.
+O cache de segmentos não intercepta automaticamente o fluxo contínuo do tunnel. Para o IPTV aproveitar o cache, o produtor HLS precisa enviar os segmentos pela API de cache e a playlist precisa apontar para as rotas `/cache/...`. Essa separação mantém o relay antigo funcionando sem alterar seu comportamento.
