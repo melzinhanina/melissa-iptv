@@ -64,6 +64,7 @@ async function handleAgentPoll(req, res) {
         clearTimeout(waiter.timer);
         const index = pollWaiters.indexOf(waiter);
         if (index !== -1) pollWaiters.splice(index, 1);
+        resolve(null);
       });
     });
   }
@@ -125,11 +126,19 @@ function handleAgentResponse(req, res, requestId) {
   req.on("error", (error) => {
     pendingProxyRequests.delete(requestId);
     if (!pending.res.destroyed) pending.res.destroy(error);
+    if (!res.headersSent) {
+      res.writeHead(502);
+      res.end("Response stream failed");
+    }
   });
-  req.on("end", () => pendingProxyRequests.delete(requestId));
+  req.on("end", () => {
+    pendingProxyRequests.delete(requestId);
+    if (!res.headersSent) {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end("stream accepted");
+    }
+  });
   req.pipe(pending.res);
-  res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-  res.end("stream accepted");
 }
 
 function proxyToTermux(req, res, url) {
