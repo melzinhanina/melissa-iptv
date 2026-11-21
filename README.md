@@ -88,7 +88,7 @@ O cache é volátil: reiniciar o processo limpa os segmentos. As rotas são púb
 
 ## Tunnel HTTP reverso automático
 
-O Termux mantém uma conexão de polling autenticada com este relay. Quando o player abre uma URL em `/iptv/...`, o Hostless encaminha a requisição ao Termux e devolve a resposta ao player. Isso permite publicar a própria playlist, os manifests HLS e também requisições HTTP Range sem expor o IP local do Termux.
+O Termux mantém uma conexão de polling com este relay, sem exigir senha ou token. Quando o player abre uma URL em `/iptv/...`, o Hostless encaminha a requisição ao Termux e devolve a resposta ao player. Isso permite publicar a própria playlist, os manifests HLS e também requisições HTTP Range sem expor o IP local do Termux.
 
 URL pública da playlist HLS:
 
@@ -96,7 +96,7 @@ URL pública da playlist HLS:
 https://melissa-iptv.hostless.app/iptv/playlist-hls.m3u8
 ```
 
-Configure `AGENT_TOKEN` nas variáveis de ambiente deste app Hostless. O valor deve ser igual a `HOSTLESS_AGENT_TOKEN` no arquivo `.env` do Termux. O token autentica apenas a conexão entre os servidores; o player não precisa enviar token, código ou cabeçalho especial.
+Não há configuração de senha, token ou código. O agente do Termux inicia automaticamente e o player usa somente a URL pública. As rotas de agente são endpoints técnicos públicos e devem ser usadas apenas neste serviço.
 
 O agente reverso é iniciado automaticamente pelo `npm start` do servidor Termux. Não é necessário executar o cliente de tunnel antigo. As rotas `/enviar/:id` e `/receber/:id` continuam disponíveis para o fluxo linear legado.
 
