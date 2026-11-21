@@ -6,7 +6,7 @@ import { createSegmentCache } from "./cache/segment-cache.mjs";
 const PORT = Number(process.env.PORT || 18080);
 const transfers = new Map();
 const segmentCache = createSegmentCache({
-  maxBytes: Number(process.env.CACHE_MAX_BYTES || 128 * 1024 * 1024),
+  maxBytes: Number(process.env.CACHE_MAX_BYTES || 512 * 1024 * 1024),
   maxSegmentBytes: Number(process.env.CACHE_MAX_SEGMENT_BYTES || 16 * 1024 * 1024),
   defaultTtlMs: Number(process.env.CACHE_TTL_MS || 10 * 60 * 1000)
 });
