@@ -123,6 +123,9 @@ function handleAgentResponse(req, res, requestId) {
   }
   clearTimeout(pending.timer);
   pending.res.writeHead(status, headers);
+  pending.res.once("close", () => {
+    if (!pending.res.writableEnded && !req.destroyed) req.destroy();
+  });
   req.on("error", (error) => {
     pendingProxyRequests.delete(requestId);
     if (!pending.res.destroyed) pending.res.destroy(error);
@@ -179,6 +182,8 @@ function proxyToTermux(req, res, url) {
       clearTimeout(pending.timer);
       pendingProxyRequests.delete(requestId);
     }
+    const queuedIndex = proxyQueue.findIndex((item) => item.id === requestId);
+    if (queuedIndex !== -1) proxyQueue.splice(queuedIndex, 1);
   });
   dispatchProxyJob(job);
 }
