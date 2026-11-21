@@ -31,23 +31,21 @@ export function createSegmentCache(options = {}) {
 
   async function put(streamId, segmentId, request) {
     const key = keyFor(streamId, segmentId);
-    const declaredLength = Number(request.headers["content-length"]);
-    if (Number.isFinite(declaredLength) && declaredLength > maxSegmentBytes) {
-      const error = new Error("Segment exceeds maximum size");
-      error.statusCode = 413;
-      throw error;
-    }
-
     const chunks = [];
     let size = 0;
+    let tooLarge = false;
     for await (const chunk of request) {
       size += chunk.length;
       if (size > maxSegmentBytes) {
-        const error = new Error("Segment exceeds maximum size");
-        error.statusCode = 413;
-        throw error;
+        tooLarge = true;
+        continue;
       }
-      chunks.push(chunk);
+      if (!tooLarge) chunks.push(chunk);
+    }
+    if (tooLarge) {
+      const error = new Error("Segment exceeds maximum size");
+      error.statusCode = 413;
+      throw error;
     }
 
     const data = Buffer.concat(chunks, size);
