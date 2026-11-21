@@ -71,7 +71,7 @@ DELETE /cache/:stream/:segment
 
 Valores padrão:
 
-- Cache total: 128 MiB.
+- Cache total: 512 MiB.
 - Tamanho máximo por segmento: 16 MiB.
 - Validade padrão: 10 minutos.
 - Validade máxima por segmento: 1 hora.
