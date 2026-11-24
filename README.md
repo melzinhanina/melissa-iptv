@@ -125,7 +125,7 @@ O relay também oferece um canal separado para o agente Termux do repositório `
 Configure no Hostless:
 
 - `REVERSE_AGENT_TOKEN`: segredo aleatório com pelo menos 32 caracteres, compartilhado somente com a Melissa Downloader API e com o agente Termux.
-- `DOWNLOAD_PROXY_TIMEOUT_MS`: opcional; padrão 600000 ms.
+- `DOWNLOAD_PROXY_TIMEOUT_MS`: opcional; padrão 660000 ms.
 
 Rotas internas:
 - `GET /reverse-download?url=...&mode=video|audio`: solicita uma tarefa e transmite o arquivo quando o agente responde. Exige `X-Downloader-Token`.
