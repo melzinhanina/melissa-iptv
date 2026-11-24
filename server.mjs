@@ -21,7 +21,7 @@ const pendingDownloadRequests = new Map();
 const downloadQueue = [];
 const downloadPollWaiters = [];
 const REVERSE_AGENT_TOKEN = process.env.REVERSE_AGENT_TOKEN || "";
-const DOWNLOAD_PROXY_TIMEOUT_MS = Math.max(60_000, Number(process.env.DOWNLOAD_PROXY_TIMEOUT_MS || 600_000));
+const DOWNLOAD_PROXY_TIMEOUT_MS = Math.max(60_000, Number(process.env.DOWNLOAD_PROXY_TIMEOUT_MS || 660_000));
 
 function tokenMatches(value) {
   if (!REVERSE_AGENT_TOKEN || REVERSE_AGENT_TOKEN.length < 32 || typeof value !== "string") return false;
