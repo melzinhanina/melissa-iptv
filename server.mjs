@@ -20,12 +20,12 @@ const PROXY_REQUEST_TIMEOUT_MS = Math.max(15_000, Number(process.env.PROXY_REQUE
 const pendingDownloadRequests = new Map();
 const downloadQueue = [];
 const downloadPollWaiters = [];
-const REVERSE_AGENT_TOKEN = process.env.REVERSE_AGENT_TOKEN || "";
+const API_KEY = process.env.API_KEY || "";
 const DOWNLOAD_PROXY_TIMEOUT_MS = Math.max(60_000, Number(process.env.DOWNLOAD_PROXY_TIMEOUT_MS || 660_000));
 
 function tokenMatches(value) {
-  if (!REVERSE_AGENT_TOKEN || REVERSE_AGENT_TOKEN.length < 32 || typeof value !== "string") return false;
-  const expected = Buffer.from(REVERSE_AGENT_TOKEN);
+  if (!API_KEY || API_KEY.length < 32 || typeof value !== "string") return false;
+  const expected = Buffer.from(API_KEY);
   const received = Buffer.from(value);
   return expected.length === received.length && timingSafeEqual(expected, received);
 }
@@ -212,8 +212,8 @@ function proxyToTermux(req, res, url) {
 
 
 function handleReverseDownload(req, res, url) {
-  if (!REVERSE_AGENT_TOKEN || REVERSE_AGENT_TOKEN.length < 32) {
-    jsonResponse(res, 503, { error: "REVERSE_AGENT_TOKEN não está configurado no relay" });
+  if (!API_KEY || API_KEY.length < 32) {
+    jsonResponse(res, 503, { error: "API_KEY não está configurada no relay" });
     return;
   }
   if (!tokenMatches(String(req.headers["x-downloader-token"] || ""))) {
@@ -280,8 +280,8 @@ const server = http.createServer(async (req, res) => {
 
 
   if (url.pathname === "/download-agent/poll" && req.method === "GET") {
-    if (!tokenMatches(String(req.headers["x-agent-token"] || ""))) {
-      jsonResponse(res, REVERSE_AGENT_TOKEN ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
+    if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
+      jsonResponse(res, API_KEY ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
       return;
     }
     await handleDownloadAgentPoll(req, res);
