@@ -116,3 +116,20 @@ O `client.mjs` continua com a função antiga de enviar o fluxo local ao tunnel.
 ## Importante
 
 O cache de segmentos não intercepta automaticamente o fluxo contínuo do tunnel. Para o IPTV aproveitar o cache, o produtor HLS precisa enviar os segmentos pela API de cache e a playlist precisa apontar para as rotas `/cache/...`. Essa separação mantém o relay antigo funcionando sem alterar seu comportamento.
+
+
+## Fallback de download reverso (YouTube)
+
+O relay também oferece um canal separado para o agente Termux do repositório `downloader-reverso`. Ele reutiliza o mecanismo de polling do túnel, mas mantém fila, timeout e respostas próprios para não consumir tarefas IPTV.
+
+Configure no Hostless:
+
+- `REVERSE_AGENT_TOKEN`: segredo aleatório com pelo menos 32 caracteres, compartilhado somente com a Melissa Downloader API e com o agente Termux.
+- `DOWNLOAD_PROXY_TIMEOUT_MS`: opcional; padrão 600000 ms.
+
+Rotas internas:
+- `GET /reverse-download?url=...&mode=video|audio`: solicita uma tarefa e transmite o arquivo quando o agente responde. Exige `X-Downloader-Token`.
+- `GET /download-agent/poll`: polling autenticado do agente.
+- `POST /download-agent/respond/:id`: recebe o fluxo binário autenticado do agente.
+
+O novo canal valida URLs HTTPS dos domínios oficiais do YouTube. As rotas IPTV antigas `/agent/*`, `/iptv/*`, `/enviar/*` e `/receber/*` permanecem separadas e não têm seu contrato alterado.
