@@ -1,5 +1,5 @@
 import http from "node:http";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { createSegmentCache } from "./cache/segment-cache.mjs";
 
@@ -17,19 +17,6 @@ const proxyQueue = [];
 const pollWaiters = [];
 const PROXY_REQUEST_TIMEOUT_MS = Math.max(15_000, Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 90_000));
 
-const pendingDownloadRequests = new Map();
-const downloadQueue = [];
-const downloadPollWaiters = [];
-const API_KEY = process.env.API_KEY || "";
-const DOWNLOAD_PROXY_TIMEOUT_MS = Math.max(60_000, Number(process.env.DOWNLOAD_PROXY_TIMEOUT_MS || 660_000));
-
-function tokenMatches(value) {
-  if (!API_KEY || API_KEY.length < 32 || typeof value !== "string") return false;
-  const expected = Buffer.from(API_KEY);
-  const received = Buffer.from(value);
-  return expected.length === received.length && timingSafeEqual(expected, received);
-}
-
 function jsonResponse(res, status, value) {
   const body = JSON.stringify(value);
   res.writeHead(status, {
@@ -40,44 +27,14 @@ function jsonResponse(res, status, value) {
   res.end(body);
 }
 
-function dispatchProxyJob(job, queue = proxyQueue, waiters = pollWaiters) {
-  const waiter = waiters.shift();
+function dispatchProxyJob(job) {
+  const waiter = pollWaiters.shift();
   if (waiter) {
     clearTimeout(waiter.timer);
     waiter.resolve(job);
   } else {
-    queue.push(job);
+    proxyQueue.push(job);
   }
-}
-
-async function handleDownloadAgentPoll(req, res) {
-  let job = downloadQueue.shift() || null;
-  if (!job) {
-    job = await new Promise((resolve) => {
-      const waiter = {
-        resolve,
-        timer: setTimeout(() => {
-          const index = downloadPollWaiters.indexOf(waiter);
-          if (index !== -1) downloadPollWaiters.splice(index, 1);
-          resolve(null);
-        }, 25_000)
-      };
-      downloadPollWaiters.push(waiter);
-      res.once("close", () => {
-        clearTimeout(waiter.timer);
-        const index = downloadPollWaiters.indexOf(waiter);
-        if (index !== -1) downloadPollWaiters.splice(index, 1);
-        resolve(null);
-      });
-    });
-  }
-  if (res.destroyed || res.writableEnded) return;
-  if (!job) {
-    res.writeHead(204, { "cache-control": "no-store" });
-    res.end();
-    return;
-  }
-  jsonResponse(res, 200, job);
 }
 
 async function handleAgentPoll(req, res) {
@@ -113,7 +70,7 @@ async function handleAgentPoll(req, res) {
 function safeResponseHeaders(input) {
   const allowed = new Set([
     "content-type", "content-range", "accept-ranges", "cache-control",
-    "etag", "last-modified", "content-disposition", "content-length", "expires", "vary"
+    "etag", "last-modified", "content-disposition", "expires", "vary"
   ]);
   const output = {};
   for (const [name, value] of Object.entries(input || {})) {
@@ -123,8 +80,8 @@ function safeResponseHeaders(input) {
   return output;
 }
 
-function handleAgentResponse(req, res, requestId, pendingMap = pendingProxyRequests) {
-  const pending = pendingMap.get(requestId);
+function handleAgentResponse(req, res, requestId) {
+  const pending = pendingProxyRequests.get(requestId);
   if (!pending || pending.res.destroyed || pending.res.writableEnded) {
     req.resume();
     res.writeHead(410);
@@ -154,7 +111,7 @@ function handleAgentResponse(req, res, requestId, pendingMap = pendingProxyReque
     if (!pending.res.writableEnded && !req.destroyed) req.destroy();
   });
   req.on("error", (error) => {
-    pendingMap.delete(requestId);
+    pendingProxyRequests.delete(requestId);
     if (!pending.res.destroyed) pending.res.destroy(error);
     if (!res.headersSent) {
       res.writeHead(502);
@@ -162,7 +119,7 @@ function handleAgentResponse(req, res, requestId, pendingMap = pendingProxyReque
     }
   });
   req.on("end", () => {
-    pendingMap.delete(requestId);
+    pendingProxyRequests.delete(requestId);
     if (!res.headersSent) {
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       res.end("stream accepted");
@@ -210,99 +167,9 @@ function proxyToTermux(req, res, url) {
   dispatchProxyJob(job);
 }
 
-
-function handleReverseDownload(req, res, url) {
-  if (!API_KEY || API_KEY.length < 32) {
-    jsonResponse(res, 503, { error: "API_KEY não está configurada no relay" });
-    return;
-  }
-  if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
-    jsonResponse(res, 401, { error: "Token do downloader reverso inválido" });
-    return;
-  }
-  if (req.method !== "GET") {
-    res.writeHead(405, { allow: "GET" });
-    res.end();
-    return;
-  }
-
-  const rawUrl = url.searchParams.get("url");
-  let mediaUrl;
-  try { mediaUrl = new URL(rawUrl); } catch {}
-  const allowedHosts = new Set([
-    "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
-    "youtu.be", "www.youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com"
-  ]);
-  if (!mediaUrl || mediaUrl.protocol !== "https:" || !allowedHosts.has(mediaUrl.hostname.toLowerCase()) ||
-      mediaUrl.username || mediaUrl.password || mediaUrl.port) {
-    jsonResponse(res, 400, { error: "Apenas URLs HTTPS oficiais do YouTube são aceitas" });
-    return;
-  }
-  const mode = url.searchParams.get("mode") || "video";
-  if (mode !== "video" && mode !== "audio") {
-    jsonResponse(res, 400, { error: "Modo deve ser video ou audio" });
-    return;
-  }
-
-  const requestId = randomUUID();
-  const job = {
-    id: requestId,
-    method: "GET",
-    path: "/_downloader-reverse?url=" + encodeURIComponent(mediaUrl.toString()) + "&mode=" + mode,
-    headers: {}
-  };
-  const timer = setTimeout(() => {
-    const pending = pendingDownloadRequests.get(requestId);
-    if (!pending) return;
-    pendingDownloadRequests.delete(requestId);
-    if (!pending.res.headersSent) {
-      jsonResponse(pending.res, 504, { error: "O agente Termux não respondeu dentro do tempo limite" });
-    } else if (!pending.res.destroyed) {
-      pending.res.destroy();
-    }
-  }, DOWNLOAD_PROXY_TIMEOUT_MS);
-  pendingDownloadRequests.set(requestId, { res, timer });
-  res.once("close", () => {
-    if (res.writableEnded) return;
-    const pending = pendingDownloadRequests.get(requestId);
-    if (pending) {
-      clearTimeout(pending.timer);
-      pendingDownloadRequests.delete(requestId);
-    }
-    const queuedIndex = downloadQueue.findIndex(item => item.id === requestId);
-    if (queuedIndex !== -1) downloadQueue.splice(queuedIndex, 1);
-  });
-  dispatchProxyJob(job, downloadQueue, downloadPollWaiters);
-}
-
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
 
-
-  if (url.pathname === "/download-agent/poll" && req.method === "GET") {
-    if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
-      jsonResponse(res, API_KEY ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
-      return;
-    }
-    await handleDownloadAgentPoll(req, res);
-    return;
-  }
-
-  const downloadResponseMatch = url.pathname.match(/^\/download-agent\/respond\/([0-9a-f-]{36})$/i);
-  if (downloadResponseMatch && req.method === "POST") {
-    if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
-      req.resume();
-      jsonResponse(res, API_KEY ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
-      return;
-    }
-    handleAgentResponse(req, res, downloadResponseMatch[1], pendingDownloadRequests);
-    return;
-  }
-
-  if (url.pathname === "/reverse-download") {
-    handleReverseDownload(req, res, url);
-    return;
-  }
 
   if (url.pathname === "/agent/poll" && req.method === "GET") {
     await handleAgentPoll(req, res);
