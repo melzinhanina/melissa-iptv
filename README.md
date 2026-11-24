@@ -124,12 +124,12 @@ O relay também oferece um canal separado para o agente Termux do repositório `
 
 Configure no Hostless:
 
-- `REVERSE_AGENT_TOKEN`: segredo aleatório com pelo menos 32 caracteres, compartilhado somente com a Melissa Downloader API e com o agente Termux.
+- `API_KEY`: a mesma chave privada configurada na Melissa Downloader API (mínimo 32 caracteres), também usada pelo agente Termux.
 - `DOWNLOAD_PROXY_TIMEOUT_MS`: opcional; padrão 660000 ms.
 
 Rotas internas:
-- `GET /reverse-download?url=...&mode=video|audio`: solicita uma tarefa e transmite o arquivo quando o agente responde. Exige `X-Downloader-Token`.
-- `GET /download-agent/poll`: polling autenticado do agente.
-- `POST /download-agent/respond/:id`: recebe o fluxo binário autenticado do agente.
+- `GET /reverse-download?url=...&mode=video|audio`: solicita uma tarefa e transmite o arquivo quando o agente responde. Exige `X-API-Key`.
+- `GET /download-agent/poll`: polling autenticado com `X-API-Key`.
+- `POST /download-agent/respond/:id`: recebe o fluxo binário autenticado com `X-API-Key`.
 
 O novo canal valida URLs HTTPS dos domínios oficiais do YouTube. As rotas IPTV antigas `/agent/*`, `/iptv/*`, `/enviar/*` e `/receber/*` permanecem separadas e não têm seu contrato alterado.
