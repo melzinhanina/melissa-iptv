@@ -288,7 +288,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const downloadResponseMatch = url.pathname.match(/^\\/download-agent\\/respond\\/([0-9a-f-]{36})$/i);
+  const downloadResponseMatch = url.pathname.match(/^\/download-agent\/respond\/([0-9a-f-]{36})$/i);
   if (downloadResponseMatch && req.method === "POST") {
     if (!tokenMatches(String(req.headers["x-agent-token"] || ""))) {
       req.resume();
