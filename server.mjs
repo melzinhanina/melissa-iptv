@@ -216,7 +216,7 @@ function handleReverseDownload(req, res, url) {
     jsonResponse(res, 503, { error: "API_KEY não está configurada no relay" });
     return;
   }
-  if (!tokenMatches(String(req.headers["x-downloader-token"] || ""))) {
+  if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
     jsonResponse(res, 401, { error: "Token do downloader reverso inválido" });
     return;
   }
@@ -290,9 +290,9 @@ const server = http.createServer(async (req, res) => {
 
   const downloadResponseMatch = url.pathname.match(/^\/download-agent\/respond\/([0-9a-f-]{36})$/i);
   if (downloadResponseMatch && req.method === "POST") {
-    if (!tokenMatches(String(req.headers["x-agent-token"] || ""))) {
+    if (!tokenMatches(String(req.headers["x-api-key"] || ""))) {
       req.resume();
-      jsonResponse(res, REVERSE_AGENT_TOKEN ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
+      jsonResponse(res, API_KEY ? 401 : 503, { error: "Agente reverso não autorizado ou token não configurado" });
       return;
     }
     handleAgentResponse(req, res, downloadResponseMatch[1], pendingDownloadRequests);
